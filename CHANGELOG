@@ -1,0 +1,9 @@
+pkg_lib CHANGELOG
+==================
+
+- v1.0.0 | Mar 06 2026:
+  [New] Repository skeleton with batsman test infrastructure (v1.0.3)
+  [New] Minimal pkg_lib.sh stub with source guard and version variable
+  [New] 9-OS Docker test matrix (debian12, centos6-rocky10, ubuntu 12.04-24.04)
+  [New] CI workflow with lint + batsman reusable test workflow
+  [New] Scaffold validation tests (00-scaffold.bats, 2 tests)
