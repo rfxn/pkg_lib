@@ -27,6 +27,30 @@ pkg_common_setup() {
 
 	# Reset source guard to allow re-sourcing for clean state
 	_PKG_LIB_LOADED=""
+
+	# Reset all detection caches so each test starts fresh
+	_PKG_COLOR_INIT_DONE=""
+	_PKG_C_RED=""
+	_PKG_C_GREEN=""
+	_PKG_C_YELLOW=""
+	_PKG_C_BOLD=""
+	_PKG_C_RESET=""
+	_PKG_OS_DETECT_DONE=""
+	_PKG_OS_FAMILY=""
+	_PKG_OS_ID=""
+	_PKG_OS_VERSION=""
+	_PKG_OS_NAME=""
+	_PKG_INIT_DETECT_DONE=""
+	_PKG_INIT_SYSTEM=""
+	_PKG_PKGMGR_DETECT_DONE=""
+	_PKG_PKGMGR=""
+	_PKG_DEPS_MISSING=0
+
+	# Disable color output for reproducible test results
+	PKG_NO_COLOR=1
+	export PKG_NO_COLOR
+
+	# Re-source library with clean state
 	# shellcheck disable=SC1091
 	source "${PROJECT_ROOT}/files/pkg_lib.sh"
 

@@ -2,6 +2,20 @@ pkg_lib CHANGELOG
 ==================
 
 - v1.0.0 | Mar 06 2026:
+  [New] Output functions: pkg_header, pkg_info, pkg_warn, pkg_error, pkg_success,
+      pkg_section, pkg_item with terminal color detection (_pkg_color_init)
+  [New] OS/platform detection: pkg_detect_os with /etc/os-release and legacy
+      fallback chain (redhat-release, debian_version, gentoo, slackware, uname)
+  [New] Init system detection: pkg_detect_init with systemd, SysV, upstart,
+      rc.local cascade; pkg_is_systemd convenience function
+  [New] Package manager detection: pkg_detect_pkgmgr with command -v cascade
+      (dnf, yum, apt, emerge, pkg, slackpkg); pkg_os_family accessor
+  [New] Dependency checking: pkg_check_dep with required/recommended/optional
+      levels; pkg_check_deps for batch parallel-array checking; pkg_dep_hint
+      for package-manager-specific install hints
+  [New] Output function tests (01-output.bats, 21 tests)
+  [New] OS detection tests (02-os-detect.bats, 17 tests)
+  [New] Dependency checking tests (03-deps.bats, 23 tests)
   [New] Repository skeleton with batsman test infrastructure (v1.0.3)
   [New] Minimal pkg_lib.sh stub with source guard and version variable
   [New] 9-OS Docker test matrix (debian12, centos6-rocky10, ubuntu 12.04-24.04)
