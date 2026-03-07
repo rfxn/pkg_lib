@@ -269,6 +269,24 @@ EOF
 	[[ "$status" -eq 1 ]]
 }
 
+@test "pkg_cron_preserve_schedule: rejects invalid variable name" {
+	local cron_file="${TEST_TMPDIR}/test.cron"
+	printf '*/10 * * * * root /usr/local/bin/myapp\n' > "$cron_file"
+
+	run pkg_cron_preserve_schedule "$cron_file" "foo;rm -rf /"
+	[[ "$status" -eq 1 ]]
+	[[ "$output" == *"invalid variable name"* ]]
+}
+
+@test "pkg_cron_preserve_schedule: rejects var name starting with digit" {
+	local cron_file="${TEST_TMPDIR}/test.cron"
+	printf '*/10 * * * * root /usr/local/bin/myapp\n' > "$cron_file"
+
+	run pkg_cron_preserve_schedule "$cron_file" "1VAR"
+	[[ "$status" -eq 1 ]]
+	[[ "$output" == *"invalid variable name"* ]]
+}
+
 @test "pkg_cron_preserve_schedule: fails with empty arguments" {
 	run pkg_cron_preserve_schedule "" "SAVED_SCHED"
 	[[ "$status" -eq 1 ]]

@@ -1966,19 +1966,48 @@ pkg_cron_cleanup_legacy() {
 
 	local pattern path
 	for pattern in "$@"; do
-		# Expand glob — disable nullglob check manually
-		local found=0
+		# Expand glob — no-op if pattern matches nothing
 		for path in $pattern; do
 			if [[ -f "$path" ]]; then
 				rm -f "$path" || pkg_warn "pkg_cron_cleanup_legacy: failed to remove ${path}"
-				found=1
 			fi
 		done
-		if [[ "$found" -eq 0 ]]; then
-			: # no matches — intentional no-op
-		fi
 	done
 
+	return 0
+}
+
+# _pkg_cron_read_schedule cron_file — echo the 5-field schedule from first cron line
+# Internal helper: reads cron_file, skips comments, empty lines, and variable
+# assignments, extracts the first 5 whitespace-delimited fields (cron schedule).
+# Echoes the schedule string; returns 1 if no schedule found.
+_pkg_cron_read_schedule() {
+	local cron_file="$1"
+	local line schedule=""
+	local comment_pat='^[[:space:]]*(#|$)'
+	local assign_pat='^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*='
+
+	while IFS= read -r line; do
+		# Skip comments and empty lines
+		if [[ "$line" =~ $comment_pat ]]; then
+			continue
+		fi
+		# Skip variable assignments (VAR=value)
+		if [[ "$line" =~ $assign_pat ]]; then
+			continue
+		fi
+		# Extract first 5 whitespace-delimited fields (cron schedule)
+		schedule=$(echo "$line" | awk '{print $1, $2, $3, $4, $5}')
+		if [[ -n "$schedule" ]]; then
+			break
+		fi
+	done < "$cron_file"
+
+	if [[ -z "$schedule" ]]; then
+		return 1
+	fi
+
+	echo "$schedule"
 	return 0
 }
 
@@ -2001,31 +2030,17 @@ pkg_cron_preserve_schedule() {
 		return 1
 	fi
 
-	# Read first non-comment, non-empty line and extract 5-field schedule
-	local line schedule
-	while IFS= read -r line; do
-		# Skip comments and empty lines
-		local comment_pat='^[[:space:]]*(#|$)'
-		if [[ "$line" =~ $comment_pat ]]; then
-			continue
-		fi
-		# Skip variable assignments (VAR=value)
-		local assign_pat='^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*='
-		if [[ "$line" =~ $assign_pat ]]; then
-			continue
-		fi
-		# Extract first 5 whitespace-delimited fields (cron schedule)
-		schedule=$(echo "$line" | awk '{print $1, $2, $3, $4, $5}')
-		if [[ -n "$schedule" ]]; then
-			break
-		fi
-	done < "$cron_file"
-
-	if [[ -z "$schedule" ]]; then
+	# Validate var_name is a safe shell identifier before eval
+	local valid_ident='^[A-Za-z_][A-Za-z0-9_]*$'
+	if ! [[ "$var_name" =~ $valid_ident ]]; then
+		pkg_error "pkg_cron_preserve_schedule: invalid variable name: ${var_name}"
 		return 1
 	fi
 
-	# Export via eval — var_name is validated by caller convention
+	local schedule
+	schedule=$(_pkg_cron_read_schedule "$cron_file") || return 1
+
+	# Export via eval — var_name validated as safe identifier above
 	eval "${var_name}=\${schedule}"
 	return 0
 }
@@ -2052,27 +2067,11 @@ pkg_cron_restore_schedule() {
 	fi
 
 	# Find current schedule from first cron line
-	local current_schedule=""
-	local line
-	while IFS= read -r line; do
-		local comment_pat='^[[:space:]]*(#|$)'
-		if [[ "$line" =~ $comment_pat ]]; then
-			continue
-		fi
-		local assign_pat='^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*='
-		if [[ "$line" =~ $assign_pat ]]; then
-			continue
-		fi
-		current_schedule=$(echo "$line" | awk '{print $1, $2, $3, $4, $5}')
-		if [[ -n "$current_schedule" ]]; then
-			break
-		fi
-	done < "$cron_file"
-
-	if [[ -z "$current_schedule" ]]; then
+	local current_schedule
+	current_schedule=$(_pkg_cron_read_schedule "$cron_file") || {
 		pkg_warn "pkg_cron_restore_schedule: no cron line found in ${cron_file}"
 		return 1
-	fi
+	}
 
 	# If schedules are the same, nothing to do
 	if [[ "$current_schedule" = "$old_schedule" ]]; then
@@ -2200,6 +2199,43 @@ pkg_man_install() {
 	return 0
 }
 
+# _pkg_install_sysfile src name dest_dir func_name — shared sysfile install helper
+# Internal helper: validates source file, ensures dest_dir exists, copies with mode 644.
+# Arguments:
+#   $1 — source file path
+#   $2 — name for installed file
+#   $3 — destination directory
+#   $4 — calling function name (for error messages)
+# Returns 1 on failure.
+_pkg_install_sysfile() {
+	local src="$1" name="$2" dest_dir="$3" func_name="$4"
+
+	if [[ -z "$src" ]] || [[ -z "$name" ]]; then
+		pkg_error "${func_name}: src and name required"
+		return 1
+	fi
+
+	if [[ ! -f "$src" ]]; then
+		pkg_error "${func_name}: source file not found: ${src}"
+		return 1
+	fi
+
+	if [[ ! -d "$dest_dir" ]]; then
+		mkdir -p "$dest_dir" || {
+			pkg_error "${func_name}: failed to create ${dest_dir}"
+			return 1
+		}
+	fi
+
+	/usr/bin/cp -f "$src" "${dest_dir}/${name}" || {
+		pkg_error "${func_name}: failed to install ${name}"
+		return 1
+	}
+	chmod 644 "${dest_dir}/${name}"
+
+	return 0
+}
+
 # pkg_bash_completion src name — install bash completion file
 # Arguments:
 #   $1 — source completion file
@@ -2207,33 +2243,8 @@ pkg_man_install() {
 # Installs to /etc/bash_completion.d/ with mode 644.
 # Returns 1 on failure.
 pkg_bash_completion() {
-	local src="$1" name="$2"
-
-	if [[ -z "$src" ]] || [[ -z "$name" ]]; then
-		pkg_error "pkg_bash_completion: src and name required"
-		return 1
-	fi
-
-	if [[ ! -f "$src" ]]; then
-		pkg_error "pkg_bash_completion: source file not found: ${src}"
-		return 1
-	fi
-
-	local comp_dir="/etc/bash_completion.d"
-	if [[ ! -d "$comp_dir" ]]; then
-		mkdir -p "$comp_dir" || {
-			pkg_error "pkg_bash_completion: failed to create ${comp_dir}"
-			return 1
-		}
-	fi
-
-	/usr/bin/cp -f "$src" "${comp_dir}/${name}" || {
-		pkg_error "pkg_bash_completion: failed to install ${name}"
-		return 1
-	}
-	chmod 644 "${comp_dir}/${name}"
-
-	pkg_info "installed bash completion: ${name}"
+	_pkg_install_sysfile "$1" "$2" "/etc/bash_completion.d" "pkg_bash_completion" || return 1
+	pkg_info "installed bash completion: ${2}"
 	return 0
 }
 
@@ -2244,33 +2255,8 @@ pkg_bash_completion() {
 # Installs to /etc/logrotate.d/ with mode 644.
 # Returns 1 on failure.
 pkg_logrotate_install() {
-	local src="$1" name="$2"
-
-	if [[ -z "$src" ]] || [[ -z "$name" ]]; then
-		pkg_error "pkg_logrotate_install: src and name required"
-		return 1
-	fi
-
-	if [[ ! -f "$src" ]]; then
-		pkg_error "pkg_logrotate_install: source file not found: ${src}"
-		return 1
-	fi
-
-	local lr_dir="/etc/logrotate.d"
-	if [[ ! -d "$lr_dir" ]]; then
-		mkdir -p "$lr_dir" || {
-			pkg_error "pkg_logrotate_install: failed to create ${lr_dir}"
-			return 1
-		}
-	fi
-
-	/usr/bin/cp -f "$src" "${lr_dir}/${name}" || {
-		pkg_error "pkg_logrotate_install: failed to install ${name}"
-		return 1
-	}
-	chmod 644 "${lr_dir}/${name}"
-
-	pkg_info "installed logrotate config: ${name}"
+	_pkg_install_sysfile "$1" "$2" "/etc/logrotate.d" "pkg_logrotate_install" || return 1
+	pkg_info "installed logrotate config: ${2}"
 	return 0
 }
 
@@ -2360,7 +2346,7 @@ pkg_config_get() {
 
 	if [[ -z "$value" ]]; then
 		# Check if the variable exists with an empty value
-		if grep -q "^[[:space:]]*${var}=" "$conf_file" 2>/dev/null; then
+		if grep -q "^[[:space:]]*${var}=" "$conf_file"; then
 			echo ""
 			return 0
 		fi
@@ -2392,12 +2378,13 @@ pkg_config_set() {
 		return 1
 	fi
 
-	# Escape val for sed replacement (handle &, /, \)
+	# Escape val for sed replacement (handle &, |, /, \)
+	# Pipe must be escaped because the outer sed uses | as delimiter
 	local esc_val
-	esc_val=$(printf '%s' "$val" | sed 's/[&/\]/\\&/g')
+	esc_val=$(printf '%s' "$val" | sed 's/[&|/\]/\\&/g')
 
 	# Check if variable already exists (uncommented)
-	if grep -q "^[[:space:]]*${var}=" "$conf_file" 2>/dev/null; then
+	if grep -q "^[[:space:]]*${var}=" "$conf_file"; then
 		# Replace existing value — match VAR=anything
 		sed -i "s|^[[:space:]]*${var}=.*|${var}=\"${esc_val}\"|" "$conf_file" || {
 			pkg_error "pkg_config_set: sed failed on ${conf_file}"
@@ -2523,13 +2510,13 @@ pkg_config_migrate_var() {
 	fi
 
 	# Check if old_var exists
-	if ! grep -q "^[[:space:]]*${old_var}=" "$conf_file" 2>/dev/null; then
+	if ! grep -q "^[[:space:]]*${old_var}=" "$conf_file"; then
 		# Nothing to migrate
 		return 0
 	fi
 
 	# Check if new_var already exists
-	if grep -q "^[[:space:]]*${new_var}=" "$conf_file" 2>/dev/null; then
+	if grep -q "^[[:space:]]*${new_var}=" "$conf_file"; then
 		# New var already set — just comment out old var
 		sed -i "s|^[[:space:]]*${old_var}=|# migrated to ${new_var}: ${old_var}=|" "$conf_file"
 		return 0

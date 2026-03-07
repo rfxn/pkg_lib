@@ -154,6 +154,14 @@ EOF
 	[[ "$output" == *"not found"* ]]
 }
 
+@test "pkg_config_set: handles pipe character in value" {
+	pkg_config_set "$MOCK_CONF" "DB_HOST" "foo|bar|baz"
+
+	run pkg_config_get "$MOCK_CONF" "DB_HOST"
+	[[ "$status" -eq 0 ]]
+	[[ "$output" = "foo|bar|baz" ]]
+}
+
 # ── pkg_config_merge ──────────────────────────────────────────────
 
 @test "pkg_config_merge: preserves old values for matching variables" {

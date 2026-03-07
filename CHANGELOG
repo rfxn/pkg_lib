@@ -2,6 +2,18 @@ pkg_lib CHANGELOG
 ==================
 
 - v1.0.0 | Mar 06 2026:
+  [Fix] pkg_config_set: escape pipe character in values (sed delimiter collision
+      caused silent failure when values contained |)
+  [Change] Cron schedule reading: extracted _pkg_cron_read_schedule helper from
+      duplicate loops in pkg_cron_preserve_schedule and pkg_cron_restore_schedule;
+      moved regex pattern declarations before while loop
+  [Change] Documentation install: extracted _pkg_install_sysfile shared helper from
+      identical pkg_bash_completion and pkg_logrotate_install implementations
+  [Fix] pkg_cron_preserve_schedule: validate var_name as shell identifier before
+      eval to prevent injection via malformed variable names
+  [Change] Config functions: removed redundant 2>/dev/null from grep -q calls where
+      file existence is already confirmed above
+  [Change] pkg_cron_cleanup_legacy: removed dead no-op block
   [New] Cron management: pkg_cron_install (auto-detect mode 644/755 from
       destination path), pkg_cron_remove (multi-file removal),
       pkg_cron_cleanup_legacy (glob-based legacy cron cleanup)
