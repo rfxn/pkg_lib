@@ -60,6 +60,10 @@ pkg_common_setup() {
 	PKG_SLACKWARE_PRIORITY="95"
 	_PKG_RCLOCAL_PATHS="/etc/rc.local /etc/rc.d/rc.local"
 
+	# Reset cron management defaults (no persistent state — functions are stateless)
+
+	# Reset config migration defaults (no persistent state — functions are stateless)
+
 	# Disable color output for reproducible test results
 	PKG_NO_COLOR=1
 	export PKG_NO_COLOR

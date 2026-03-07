@@ -1873,3 +1873,744 @@ pkg_rclocal_remove() {
 
 	return 0
 }
+
+# ══════════════════════════════════════════════════════════════════
+# Section: Cron Management
+# ══════════════════════════════════════════════════════════════════
+
+# pkg_cron_install src dest [mode] — install cron file with correct permissions
+# Arguments:
+#   $1 — source file path
+#   $2 — destination path (e.g., /etc/cron.d/myapp or /etc/cron.daily/myapp)
+#   $3 — optional mode (default: auto-detect from dest path —
+#         644 for cron.d, 755 for cron.daily/hourly/weekly/monthly)
+# Creates destination directory if missing.
+# Returns 1 on failure.
+pkg_cron_install() {
+	local src="$1" dest="$2" mode="${3:-}"
+
+	if [[ -z "$src" ]] || [[ -z "$dest" ]]; then
+		pkg_error "pkg_cron_install: src and dest required"
+		return 1
+	fi
+
+	if [[ ! -f "$src" ]]; then
+		pkg_error "pkg_cron_install: source file not found: ${src}"
+		return 1
+	fi
+
+	# Auto-detect mode from destination path if not specified
+	if [[ -z "$mode" ]]; then
+		local cron_exec_pat='cron\.(daily|hourly|weekly|monthly)'
+		if [[ "$dest" =~ $cron_exec_pat ]]; then
+			mode="755"
+		else
+			mode="644"
+		fi
+	fi
+
+	# Ensure destination directory exists
+	local dest_dir
+	dest_dir=$(dirname "$dest")
+	if [[ ! -d "$dest_dir" ]]; then
+		mkdir -p "$dest_dir" || {
+			pkg_error "pkg_cron_install: failed to create directory ${dest_dir}"
+			return 1
+		}
+	fi
+
+	/usr/bin/cp -f "$src" "$dest" || {
+		pkg_error "pkg_cron_install: failed to copy ${src} to ${dest}"
+		return 1
+	}
+
+	chmod "$mode" "$dest" || {
+		pkg_warn "pkg_cron_install: failed to set mode ${mode} on ${dest}"
+	}
+
+	pkg_info "installed cron file: ${dest}"
+	return 0
+}
+
+# pkg_cron_remove paths... — remove cron files
+# Arguments:
+#   $1+ — cron file paths to remove
+# Best-effort removal; warns on failure.
+# Returns 0 always.
+pkg_cron_remove() {
+	if [[ $# -eq 0 ]]; then
+		pkg_error "pkg_cron_remove: at least one path required"
+		return 1
+	fi
+
+	local path
+	for path in "$@"; do
+		if [[ -f "$path" ]]; then
+			rm -f "$path" || pkg_warn "pkg_cron_remove: failed to remove ${path}"
+		fi
+	done
+
+	return 0
+}
+
+# pkg_cron_cleanup_legacy patterns... — remove old/legacy cron files by path patterns
+# Arguments:
+#   $1+ — glob patterns to match legacy cron files (e.g., "/etc/cron.d/old_*")
+# Each argument is expanded as a glob. Matching files are removed.
+# Returns 0 always (best-effort cleanup).
+pkg_cron_cleanup_legacy() {
+	if [[ $# -eq 0 ]]; then
+		pkg_error "pkg_cron_cleanup_legacy: at least one pattern required"
+		return 1
+	fi
+
+	local pattern path
+	for pattern in "$@"; do
+		# Expand glob — disable nullglob check manually
+		local found=0
+		for path in $pattern; do
+			if [[ -f "$path" ]]; then
+				rm -f "$path" || pkg_warn "pkg_cron_cleanup_legacy: failed to remove ${path}"
+				found=1
+			fi
+		done
+		if [[ "$found" -eq 0 ]]; then
+			: # no matches — intentional no-op
+		fi
+	done
+
+	return 0
+}
+
+# pkg_cron_preserve_schedule cron_file var_name — capture existing schedule
+# Arguments:
+#   $1 — cron file path
+#   $2 — variable name to store the schedule line
+# Reads the first non-comment, non-empty line from cron_file and extracts
+# the first 5 fields (schedule). Exports the result in the named variable.
+# Returns 1 if cron_file not found or no schedule found.
+pkg_cron_preserve_schedule() {
+	local cron_file="$1" var_name="$2"
+
+	if [[ -z "$cron_file" ]] || [[ -z "$var_name" ]]; then
+		pkg_error "pkg_cron_preserve_schedule: cron_file and var_name required"
+		return 1
+	fi
+
+	if [[ ! -f "$cron_file" ]]; then
+		return 1
+	fi
+
+	# Read first non-comment, non-empty line and extract 5-field schedule
+	local line schedule
+	while IFS= read -r line; do
+		# Skip comments and empty lines
+		local comment_pat='^[[:space:]]*(#|$)'
+		if [[ "$line" =~ $comment_pat ]]; then
+			continue
+		fi
+		# Skip variable assignments (VAR=value)
+		local assign_pat='^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*='
+		if [[ "$line" =~ $assign_pat ]]; then
+			continue
+		fi
+		# Extract first 5 whitespace-delimited fields (cron schedule)
+		schedule=$(echo "$line" | awk '{print $1, $2, $3, $4, $5}')
+		if [[ -n "$schedule" ]]; then
+			break
+		fi
+	done < "$cron_file"
+
+	if [[ -z "$schedule" ]]; then
+		return 1
+	fi
+
+	# Export via eval — var_name is validated by caller convention
+	eval "${var_name}=\${schedule}"
+	return 0
+}
+
+# pkg_cron_restore_schedule cron_file old_schedule — restore captured schedule
+# Arguments:
+#   $1 — cron file path
+#   $2 — old schedule string (5 cron fields, e.g., "*/10 * * * *")
+# Replaces the schedule portion (first 5 fields) of the first non-comment,
+# non-assignment line in cron_file with old_schedule.
+# Handles sed escaping for * characters in cron expressions.
+# Returns 1 if cron_file not found or no cron line found to replace.
+pkg_cron_restore_schedule() {
+	local cron_file="$1" old_schedule="$2"
+
+	if [[ -z "$cron_file" ]] || [[ -z "$old_schedule" ]]; then
+		pkg_error "pkg_cron_restore_schedule: cron_file and old_schedule required"
+		return 1
+	fi
+
+	if [[ ! -f "$cron_file" ]]; then
+		pkg_error "pkg_cron_restore_schedule: file not found: ${cron_file}"
+		return 1
+	fi
+
+	# Find current schedule from first cron line
+	local current_schedule=""
+	local line
+	while IFS= read -r line; do
+		local comment_pat='^[[:space:]]*(#|$)'
+		if [[ "$line" =~ $comment_pat ]]; then
+			continue
+		fi
+		local assign_pat='^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*='
+		if [[ "$line" =~ $assign_pat ]]; then
+			continue
+		fi
+		current_schedule=$(echo "$line" | awk '{print $1, $2, $3, $4, $5}')
+		if [[ -n "$current_schedule" ]]; then
+			break
+		fi
+	done < "$cron_file"
+
+	if [[ -z "$current_schedule" ]]; then
+		pkg_warn "pkg_cron_restore_schedule: no cron line found in ${cron_file}"
+		return 1
+	fi
+
+	# If schedules are the same, nothing to do
+	if [[ "$current_schedule" = "$old_schedule" ]]; then
+		return 0
+	fi
+
+	# Escape * and / for sed (both old and new schedules)
+	local esc_current esc_old
+	esc_current=$(printf '%s' "$current_schedule" | sed 's/[*./\\]/\\&/g')
+	esc_old=$(printf '%s' "$old_schedule" | sed 's/[&/\\]/\\&/g')
+
+	# Replace first occurrence only (sed with address range)
+	sed -i "0,/${esc_current}/s/${esc_current}/${esc_old}/" "$cron_file" || {
+		pkg_warn "pkg_cron_restore_schedule: sed replacement failed on ${cron_file}"
+		return 1
+	}
+
+	return 0
+}
+
+# ══════════════════════════════════════════════════════════════════
+# Section: Documentation Installation
+# ══════════════════════════════════════════════════════════════════
+
+# _pkg_man_dir section — resolve man page directory for given section
+# Arguments:
+#   $1 — man section number (e.g., "1", "8")
+# Priority: /usr/share/man/man$section → /usr/local/share/man/man$section
+# Returns 1 if no directory found (creates /usr/share/man/man$section as fallback).
+_pkg_man_dir() {
+	local section="$1"
+
+	if [[ -d "/usr/share/man/man${section}" ]]; then
+		echo "/usr/share/man/man${section}"
+		return 0
+	fi
+
+	if [[ -d "/usr/local/share/man/man${section}" ]]; then
+		echo "/usr/local/share/man/man${section}"
+		return 0
+	fi
+
+	# Fallback: create standard path
+	local fallback="/usr/share/man/man${section}"
+	mkdir -p "$fallback" || {
+		pkg_error "_pkg_man_dir: failed to create ${fallback}"
+		return 1
+	}
+	echo "$fallback"
+	return 0
+}
+
+# pkg_man_install src section name [sed_pairs...] — install man page
+# Arguments:
+#   $1 — source man page file
+#   $2 — man section number (e.g., "1", "8")
+#   $3 — man page name (without section suffix, e.g., "myapp")
+#   $4+ — optional sed replacement pairs as "old|new" strings
+# Copies source to temp, applies optional sed replacements, gzip -f,
+# installs to man directory as name.section.gz.
+# Returns 1 on failure.
+pkg_man_install() {
+	local src="$1" section="$2" name="$3"
+	shift 3
+
+	if [[ -z "$src" ]] || [[ -z "$section" ]] || [[ -z "$name" ]]; then
+		pkg_error "pkg_man_install: src, section, and name required"
+		return 1
+	fi
+
+	if [[ ! -f "$src" ]]; then
+		pkg_error "pkg_man_install: source file not found: ${src}"
+		return 1
+	fi
+
+	local man_dir
+	if ! man_dir=$(_pkg_man_dir "$section"); then
+		pkg_error "pkg_man_install: cannot resolve man directory for section ${section}"
+		return 1
+	fi
+
+	# Work on a temp copy for sed + gzip
+	local tmpfile
+	tmpfile=$(mktemp "${PKG_TMPDIR}/man.XXXXXXXXXX") || {
+		pkg_error "pkg_man_install: mktemp failed"
+		return 1
+	}
+
+	/usr/bin/cp -f "$src" "$tmpfile" || {
+		pkg_error "pkg_man_install: failed to copy source to temp"
+		rm -f "$tmpfile"
+		return 1
+	}
+
+	# Apply optional sed replacement pairs (format: "old|new")
+	local pair old_str new_str
+	for pair in "$@"; do
+		old_str="${pair%%|*}"
+		new_str="${pair#*|}"
+		if [[ -n "$old_str" ]]; then
+			sed -i "s|${old_str}|${new_str}|g" "$tmpfile" || {
+				pkg_warn "pkg_man_install: sed replacement failed for pair: ${pair}"
+			}
+		fi
+	done
+
+	# Compress
+	gzip -f "$tmpfile" || {
+		pkg_error "pkg_man_install: gzip failed"
+		rm -f "$tmpfile"
+		return 1
+	}
+
+	# Install to man dir
+	local dest="${man_dir}/${name}.${section}.gz"
+	/usr/bin/cp -f "${tmpfile}.gz" "$dest" || {
+		pkg_error "pkg_man_install: failed to install to ${dest}"
+		rm -f "${tmpfile}.gz"
+		return 1
+	}
+	chmod 644 "$dest"
+	rm -f "${tmpfile}.gz"
+
+	pkg_info "installed man page: ${name}(${section})"
+	return 0
+}
+
+# pkg_bash_completion src name — install bash completion file
+# Arguments:
+#   $1 — source completion file
+#   $2 — name for completion file (e.g., "myapp")
+# Installs to /etc/bash_completion.d/ with mode 644.
+# Returns 1 on failure.
+pkg_bash_completion() {
+	local src="$1" name="$2"
+
+	if [[ -z "$src" ]] || [[ -z "$name" ]]; then
+		pkg_error "pkg_bash_completion: src and name required"
+		return 1
+	fi
+
+	if [[ ! -f "$src" ]]; then
+		pkg_error "pkg_bash_completion: source file not found: ${src}"
+		return 1
+	fi
+
+	local comp_dir="/etc/bash_completion.d"
+	if [[ ! -d "$comp_dir" ]]; then
+		mkdir -p "$comp_dir" || {
+			pkg_error "pkg_bash_completion: failed to create ${comp_dir}"
+			return 1
+		}
+	fi
+
+	/usr/bin/cp -f "$src" "${comp_dir}/${name}" || {
+		pkg_error "pkg_bash_completion: failed to install ${name}"
+		return 1
+	}
+	chmod 644 "${comp_dir}/${name}"
+
+	pkg_info "installed bash completion: ${name}"
+	return 0
+}
+
+# pkg_logrotate_install src name — install logrotate configuration
+# Arguments:
+#   $1 — source logrotate config file
+#   $2 — name for logrotate config (e.g., "myapp")
+# Installs to /etc/logrotate.d/ with mode 644.
+# Returns 1 on failure.
+pkg_logrotate_install() {
+	local src="$1" name="$2"
+
+	if [[ -z "$src" ]] || [[ -z "$name" ]]; then
+		pkg_error "pkg_logrotate_install: src and name required"
+		return 1
+	fi
+
+	if [[ ! -f "$src" ]]; then
+		pkg_error "pkg_logrotate_install: source file not found: ${src}"
+		return 1
+	fi
+
+	local lr_dir="/etc/logrotate.d"
+	if [[ ! -d "$lr_dir" ]]; then
+		mkdir -p "$lr_dir" || {
+			pkg_error "pkg_logrotate_install: failed to create ${lr_dir}"
+			return 1
+		}
+	fi
+
+	/usr/bin/cp -f "$src" "${lr_dir}/${name}" || {
+		pkg_error "pkg_logrotate_install: failed to install ${name}"
+		return 1
+	}
+	chmod 644 "${lr_dir}/${name}"
+
+	pkg_info "installed logrotate config: ${name}"
+	return 0
+}
+
+# pkg_doc_install dest_dir files... — install documentation files
+# Arguments:
+#   $1 — destination directory (e.g., /usr/share/doc/myapp)
+#   $2+ — source files to install (README, CHANGELOG, LICENSE, etc.)
+# Creates dest_dir if missing. Copies each file preserving name.
+# Returns 1 if dest_dir creation fails or no files specified.
+pkg_doc_install() {
+	local dest_dir="$1"
+	shift
+
+	if [[ -z "$dest_dir" ]] || [[ $# -eq 0 ]]; then
+		pkg_error "pkg_doc_install: dest_dir and at least one file required"
+		return 1
+	fi
+
+	if [[ ! -d "$dest_dir" ]]; then
+		mkdir -p "$dest_dir" || {
+			pkg_error "pkg_doc_install: failed to create ${dest_dir}"
+			return 1
+		}
+	fi
+
+	local file rc=0
+	for file in "$@"; do
+		if [[ ! -f "$file" ]]; then
+			pkg_warn "pkg_doc_install: file not found, skipping: ${file}"
+			continue
+		fi
+		local basename_file
+		basename_file=$(basename "$file")
+		/usr/bin/cp -f "$file" "${dest_dir}/${basename_file}" || {
+			pkg_warn "pkg_doc_install: failed to copy ${basename_file}"
+			rc=1
+		}
+	done
+
+	return "$rc"
+}
+
+# ══════════════════════════════════════════════════════════════════
+# Section: Config Migration
+# ══════════════════════════════════════════════════════════════════
+
+# pkg_config_get conf_file var — read variable value from config file
+# Arguments:
+#   $1 — config file path
+#   $2 — variable name to read
+# Reads the first VAR=value or VAR="value" line matching var.
+# Strips surrounding quotes. Echoes value to stdout.
+# Returns 1 if file not found or variable not found.
+pkg_config_get() {
+	local conf_file="$1" var="$2"
+
+	if [[ -z "$conf_file" ]] || [[ -z "$var" ]]; then
+		pkg_error "pkg_config_get: conf_file and var required"
+		return 1
+	fi
+
+	if [[ ! -f "$conf_file" ]]; then
+		pkg_error "pkg_config_get: file not found: ${conf_file}"
+		return 1
+	fi
+
+	local value
+	# Match VAR=value or VAR="value" or VAR='value'
+	# Use awk for single-pass extraction
+	value=$(awk -F= -v varname="$var" '
+		/^[[:space:]]*#/ { next }
+		{
+			# Trim leading whitespace from field 1 for comparison
+			key = $1
+			gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+			if (key == varname) {
+				# Remove leading varname= part, get everything after first =
+				sub(/^[^=]*=/, "")
+				# Strip surrounding quotes
+				gsub(/^[[:space:]]*["'"'"']|["'"'"'][[:space:]]*$/, "")
+				print
+				found = 1
+				exit
+			}
+		}
+	' "$conf_file")
+
+	if [[ -z "$value" ]]; then
+		# Check if the variable exists with an empty value
+		if grep -q "^[[:space:]]*${var}=" "$conf_file" 2>/dev/null; then
+			echo ""
+			return 0
+		fi
+		return 1
+	fi
+
+	echo "$value"
+	return 0
+}
+
+# pkg_config_set conf_file var val — set variable value in config file
+# Arguments:
+#   $1 — config file path
+#   $2 — variable name
+#   $3 — new value
+# If variable exists, replaces the value in-place via sed.
+# If variable does not exist, appends VAR="value" to end of file.
+# Returns 1 if file not found.
+pkg_config_set() {
+	local conf_file="$1" var="$2" val="$3"
+
+	if [[ -z "$conf_file" ]] || [[ -z "$var" ]]; then
+		pkg_error "pkg_config_set: conf_file and var required"
+		return 1
+	fi
+
+	if [[ ! -f "$conf_file" ]]; then
+		pkg_error "pkg_config_set: file not found: ${conf_file}"
+		return 1
+	fi
+
+	# Escape val for sed replacement (handle &, /, \)
+	local esc_val
+	esc_val=$(printf '%s' "$val" | sed 's/[&/\]/\\&/g')
+
+	# Check if variable already exists (uncommented)
+	if grep -q "^[[:space:]]*${var}=" "$conf_file" 2>/dev/null; then
+		# Replace existing value — match VAR=anything
+		sed -i "s|^[[:space:]]*${var}=.*|${var}=\"${esc_val}\"|" "$conf_file" || {
+			pkg_error "pkg_config_set: sed failed on ${conf_file}"
+			return 1
+		}
+	else
+		# Append new variable
+		printf '%s="%s"\n' "$var" "$val" >> "$conf_file" || {
+			pkg_error "pkg_config_set: failed to append to ${conf_file}"
+			return 1
+		}
+	fi
+
+	return 0
+}
+
+# pkg_config_merge old_conf new_conf output — AWK-based config merge
+# Arguments:
+#   $1 — old config file (existing user values)
+#   $2 — new config file (new template with defaults)
+#   $3 — output file path
+# Merge strategy:
+#   1. First pass: read all VAR=value from old config into array
+#   2. Second pass: for each line in new config, if VAR= matches old key,
+#      substitute old value; otherwise keep new default
+#   3. Preserves comments, ordering, whitespace from new template
+#   4. Safe for quoted values, multi-word values, empty values
+# Returns 1 on failure.
+pkg_config_merge() {
+	local old_conf="$1" new_conf="$2" output="$3"
+
+	if [[ -z "$old_conf" ]] || [[ -z "$new_conf" ]] || [[ -z "$output" ]]; then
+		pkg_error "pkg_config_merge: old_conf, new_conf, and output required"
+		return 1
+	fi
+
+	if [[ ! -f "$old_conf" ]]; then
+		pkg_error "pkg_config_merge: old config not found: ${old_conf}"
+		return 1
+	fi
+
+	if [[ ! -f "$new_conf" ]]; then
+		pkg_error "pkg_config_merge: new config not found: ${new_conf}"
+		return 1
+	fi
+
+	# Ensure output directory exists
+	local output_dir
+	output_dir=$(dirname "$output")
+	if [[ ! -d "$output_dir" ]]; then
+		mkdir -p "$output_dir" || {
+			pkg_error "pkg_config_merge: failed to create output directory ${output_dir}"
+			return 1
+		}
+	fi
+
+	# AWK two-pass merge: old values into new template
+	# Uses FILENAME instead of FNR==NR to handle empty old config correctly
+	awk -v oldfile="$old_conf" '
+	# First file (old config): collect VAR=value pairs
+	FILENAME == oldfile {
+		# Skip comments and empty lines
+		if ($0 ~ /^[[:space:]]*#/ || $0 ~ /^[[:space:]]*$/) next
+		# Match VAR=value
+		pos = index($0, "=")
+		if (pos > 0) {
+			varname = substr($0, 1, pos - 1)
+			gsub(/^[[:space:]]+|[[:space:]]+$/, "", varname)
+			val = substr($0, pos + 1)
+			old[varname] = val
+		}
+		next
+	}
+	# Second file (new template): output with old values merged
+	{
+		# Comments and empty lines pass through unchanged
+		if ($0 ~ /^[[:space:]]*#/ || $0 ~ /^[[:space:]]*$/) {
+			print
+			next
+		}
+		# Check for VAR=value pattern
+		pos = index($0, "=")
+		if (pos > 0) {
+			varname = substr($0, 1, pos - 1)
+			gsub(/^[[:space:]]+|[[:space:]]+$/, "", varname)
+			if (varname in old) {
+				# Substitute old value into new template line
+				print varname "=" old[varname]
+				next
+			}
+		}
+		# No match — keep new template line as-is
+		print
+	}
+	' "$old_conf" "$new_conf" > "$output" || {
+		pkg_error "pkg_config_merge: awk merge failed"
+		return 1
+	}
+
+	return 0
+}
+
+# pkg_config_migrate_var conf_file old_var new_var [transform] — rename config variable
+# Arguments:
+#   $1 — config file path
+#   $2 — old variable name
+#   $3 — new variable name
+#   $4 — optional transform: "none" (default), "lower", "upper"
+# If old_var exists and new_var does not, renames old_var to new_var.
+# Optionally transforms the value. Leaves a comment noting the migration.
+# Returns 0 if migrated or if no migration needed; 1 on error.
+pkg_config_migrate_var() {
+	local conf_file="$1" old_var="$2" new_var="$3" transform="${4:-none}"
+
+	if [[ -z "$conf_file" ]] || [[ -z "$old_var" ]] || [[ -z "$new_var" ]]; then
+		pkg_error "pkg_config_migrate_var: conf_file, old_var, and new_var required"
+		return 1
+	fi
+
+	if [[ ! -f "$conf_file" ]]; then
+		pkg_error "pkg_config_migrate_var: file not found: ${conf_file}"
+		return 1
+	fi
+
+	# Check if old_var exists
+	if ! grep -q "^[[:space:]]*${old_var}=" "$conf_file" 2>/dev/null; then
+		# Nothing to migrate
+		return 0
+	fi
+
+	# Check if new_var already exists
+	if grep -q "^[[:space:]]*${new_var}=" "$conf_file" 2>/dev/null; then
+		# New var already set — just comment out old var
+		sed -i "s|^[[:space:]]*${old_var}=|# migrated to ${new_var}: ${old_var}=|" "$conf_file"
+		return 0
+	fi
+
+	# Read old value
+	local old_val
+	old_val=$(pkg_config_get "$conf_file" "$old_var") || old_val=""
+
+	# Apply transform
+	case "$transform" in
+		lower)
+			old_val=$(echo "$old_val" | tr '[:upper:]' '[:lower:]')
+			;;
+		upper)
+			old_val=$(echo "$old_val" | tr '[:lower:]' '[:upper:]')
+			;;
+		none|"")
+			: # no transform
+			;;
+		*)
+			pkg_warn "pkg_config_migrate_var: unknown transform '${transform}', using none"
+			;;
+	esac
+
+	# Replace old_var line with new_var and add migration comment
+	sed -i "s|^[[:space:]]*${old_var}=.*|# migrated: ${old_var} -> ${new_var}\n${new_var}=\"${old_val}\"|" "$conf_file" || {
+		pkg_error "pkg_config_migrate_var: sed failed on ${conf_file}"
+		return 1
+	}
+
+	return 0
+}
+
+# pkg_config_clamp conf_file var max_val [msg] — clamp numeric config value
+# Arguments:
+#   $1 — config file path
+#   $2 — variable name
+#   $3 — maximum allowed value (integer)
+#   $4 — optional warning message (logged if value is clamped)
+# If the current value exceeds max_val, sets it to max_val and warns.
+# No-op if variable not found or value is within range.
+# Returns 0 on success; 1 on error.
+pkg_config_clamp() {
+	local conf_file="$1" var="$2" max_val="$3" msg="${4:-}"
+
+	if [[ -z "$conf_file" ]] || [[ -z "$var" ]] || [[ -z "$max_val" ]]; then
+		pkg_error "pkg_config_clamp: conf_file, var, and max_val required"
+		return 1
+	fi
+
+	if [[ ! -f "$conf_file" ]]; then
+		pkg_error "pkg_config_clamp: file not found: ${conf_file}"
+		return 1
+	fi
+
+	# Validate max_val is numeric
+	local numeric_pat='^[0-9]+$'
+	if ! [[ "$max_val" =~ $numeric_pat ]]; then
+		pkg_error "pkg_config_clamp: max_val must be a positive integer"
+		return 1
+	fi
+
+	# Read current value
+	local current_val
+	current_val=$(pkg_config_get "$conf_file" "$var") || return 0  # not found = no-op
+
+	# Check if current value is numeric
+	if ! [[ "$current_val" =~ $numeric_pat ]]; then
+		return 0  # non-numeric value — skip clamping
+	fi
+
+	# Compare and clamp if needed
+	if [[ "$current_val" -gt "$max_val" ]]; then
+		pkg_config_set "$conf_file" "$var" "$max_val" || return 1
+		if [[ -n "$msg" ]]; then
+			pkg_warn "$msg"
+		else
+			pkg_warn "pkg_config_clamp: ${var} clamped from ${current_val} to ${max_val}"
+		fi
+	fi
+
+	return 0
+}

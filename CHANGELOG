@@ -2,6 +2,29 @@ pkg_lib CHANGELOG
 ==================
 
 - v1.0.0 | Mar 06 2026:
+  [New] Cron management: pkg_cron_install (auto-detect mode 644/755 from
+      destination path), pkg_cron_remove (multi-file removal),
+      pkg_cron_cleanup_legacy (glob-based legacy cron cleanup)
+  [New] Cron schedule preservation: pkg_cron_preserve_schedule (capture 5-field
+      schedule from existing cron file), pkg_cron_restore_schedule (restore
+      captured schedule after install overwrite with sed * escaping)
+  [New] Documentation installation: pkg_man_install (copy + optional sed
+      pairs + gzip + install to auto-detected man dir), pkg_bash_completion
+      (install to /etc/bash_completion.d/), pkg_logrotate_install (install to
+      /etc/logrotate.d/), pkg_doc_install (README/CHANGELOG/LICENSE to doc dir)
+  [New] Internal helper: _pkg_man_dir (resolve man directory with standard/
+      FreeBSD/fallback paths per section)
+  [New] Config migration: pkg_config_merge (AWK two-pass merge preserving old
+      values into new template with comment/ordering preservation),
+      pkg_config_migrate_var (rename variable with optional upper/lower
+      transform and migration comment), pkg_config_clamp (clamp numeric
+      config value to maximum with warning)
+  [New] Config primitives: pkg_config_get (AWK single-pass value extraction
+      with quote stripping), pkg_config_set (sed-based in-place update or
+      append for new variables)
+  [New] Cron management tests (07-cron.bats)
+  [New] Documentation installation tests (08-docs.bats)
+  [New] Config migration tests (09-config.bats)
   [New] Service lifecycle: unified service management primitives normalizing
       systemd/SysV/Gentoo/Slackware init system handling across OS families
   [New] Service install/uninstall: pkg_service_install (unit/init script copy
