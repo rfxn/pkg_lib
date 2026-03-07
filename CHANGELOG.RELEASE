@@ -1,6 +1,10 @@
 pkg_lib v1.0.0 | Mar 06 2026:
 
 -- Fixes --
+  [Fix] pkg_fhs_install/pkg_fhs_symlink_farm: use separate failure counter
+      instead of boolean rc for accurate installed/linked count reporting
+  [Fix] pkg_fhs_gen_sed_pairs: corrected docstring to match implementation
+      (generates sed expressions from FHS destination paths, not source-tree paths)
   [Fix] pkg_config_set: escape pipe character in values (sed delimiter collision
       caused silent failure when values contained |)
   [Fix] pkg_cron_preserve_schedule: validate var_name as shell identifier before

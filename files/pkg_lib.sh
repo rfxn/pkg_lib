@@ -2677,7 +2677,7 @@ pkg_fhs_install() {
 		return 0
 	fi
 
-	local i rc=0 src_path dest_path dest_dir
+	local i rc=0 failed=0 src_path dest_path dest_dir
 	for ((i = 0; i < count; i++)); do
 		src_path="${src_dir}/${_PKG_FHS_SRCS[$i]}"
 		dest_path="${_PKG_FHS_DESTS[$i]}"
@@ -2688,6 +2688,7 @@ pkg_fhs_install() {
 			mkdir -p "$dest_dir" || {
 				pkg_error "pkg_fhs_install: failed to create directory ${dest_dir}"
 				rc=1
+				failed=$((failed + 1))
 				continue
 			}
 		fi
@@ -2697,17 +2698,20 @@ pkg_fhs_install() {
 			/usr/bin/cp -pR "$src_path" "$dest_path" || {
 				pkg_error "pkg_fhs_install: failed to copy directory ${_PKG_FHS_SRCS[$i]}"
 				rc=1
+				failed=$((failed + 1))
 				continue
 			}
 		elif [[ -f "$src_path" ]]; then
 			/usr/bin/cp -p "$src_path" "$dest_path" || {
 				pkg_error "pkg_fhs_install: failed to copy ${_PKG_FHS_SRCS[$i]}"
 				rc=1
+				failed=$((failed + 1))
 				continue
 			}
 		else
 			pkg_warn "pkg_fhs_install: source not found: ${_PKG_FHS_SRCS[$i]}"
 			rc=1
+			failed=$((failed + 1))
 			continue
 		fi
 
@@ -2715,7 +2719,7 @@ pkg_fhs_install() {
 		chmod "${_PKG_FHS_MODES[$i]}" "$dest_path" 2>/dev/null  # best-effort chmod
 	done
 
-	local installed=$((count - rc))
+	local installed=$((count - failed))
 	if [[ "$installed" -gt 0 ]]; then
 		pkg_info "installed ${installed} file(s) to FHS layout"
 	fi
@@ -2744,7 +2748,7 @@ pkg_fhs_symlink_farm() {
 		return 0
 	fi
 
-	local i rc=0 legacy_path dest_path link_dir
+	local i rc=0 failed=0 legacy_path dest_path link_dir
 	for ((i = 0; i < count; i++)); do
 		dest_path="${_PKG_FHS_DESTS[$i]}"
 		legacy_path="${legacy_root}/${_PKG_FHS_SRCS[$i]}"
@@ -2755,6 +2759,7 @@ pkg_fhs_symlink_farm() {
 			mkdir -p "$link_dir" || {
 				pkg_error "pkg_fhs_symlink_farm: failed to create ${link_dir}"
 				rc=1
+				failed=$((failed + 1))
 				continue
 			}
 		fi
@@ -2762,11 +2767,12 @@ pkg_fhs_symlink_farm() {
 		# Create symlink: legacy_path -> fhs_dest
 		pkg_symlink "$dest_path" "$legacy_path" || {
 			rc=1
+			failed=$((failed + 1))
 			continue
 		}
 	done
 
-	local linked=$((count - rc))
+	local linked=$((count - failed))
 	if [[ "$linked" -gt 0 ]]; then
 		pkg_info "created ${linked} backward-compat symlink(s) in ${legacy_root}"
 	fi
@@ -2920,9 +2926,9 @@ pkg_fhs_gen_deb_conffiles() {
 # pkg_fhs_gen_sed_pairs install_path_var — generate sed expressions for path transform
 # Arguments:
 #   $1 — install path variable name (e.g., "INSTALL_PATH" or "inspath")
-# Outputs sed -e expressions that transform source-tree literal paths to
-# runtime variable references. Used by install.sh to patch scripts at install time.
-# Example output: -e 's|/usr/local/bfd|$INSTALL_PATH|g'
+# Generates sed -e expressions replacing FHS destination directory paths with
+# a variable reference. Used by install.sh to patch scripts at install time.
+# Example output: -e 's|/usr/sbin|$INSTALL_PATH|g'
 pkg_fhs_gen_sed_pairs() {
 	local install_path_var="$1"
 

@@ -2,6 +2,10 @@ pkg_lib CHANGELOG
 ==================
 
 - v1.0.0 | Mar 06 2026:
+  [Fix] pkg_fhs_install/pkg_fhs_symlink_farm: use separate failure counter
+      instead of boolean rc for accurate installed/linked count reporting
+  [Fix] pkg_fhs_gen_sed_pairs: corrected docstring to match implementation
+      (generates sed expressions from FHS destination paths, not source-tree paths)
   [New] FHS layout: pkg_fhs_register (parallel indexed array registry for
       src/dest/mode/type file mappings), pkg_fhs_install (install registered
       files from source to FHS paths with directory creation and permissions)

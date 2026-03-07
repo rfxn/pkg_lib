@@ -169,6 +169,19 @@ teardown() {
 	[[ -d "${MOCK_FHS}/share/myapp/datadir" ]]
 }
 
+@test "pkg_fhs_install: reports correct count when multiple files fail" {
+	# Register 4 files: 2 exist, 2 missing — should report "installed 2"
+	pkg_fhs_register "files/myapp" "${MOCK_FHS}/usr/sbin/myapp" "750" "bin"
+	pkg_fhs_register "files/missing1" "${MOCK_FHS}/dest/missing1" "640" "data"
+	pkg_fhs_register "files/missing2" "${MOCK_FHS}/dest/missing2" "640" "data"
+	pkg_fhs_register "files/conf/app.conf" "${MOCK_FHS}/etc/myapp/app.conf" "640" "conf"
+	run pkg_fhs_install "$MOCK_SRC"
+	[[ "$status" -eq 1 ]]
+	[[ "$output" == *"installed 2 file(s)"* ]]
+	[[ -f "${MOCK_FHS}/usr/sbin/myapp" ]]
+	[[ -f "${MOCK_FHS}/etc/myapp/app.conf" ]]
+}
+
 # ── pkg_fhs_symlink_farm ───────────────────────────────────────
 
 @test "pkg_fhs_symlink_farm: creates symlinks from legacy to FHS" {
@@ -213,6 +226,26 @@ teardown() {
 	run pkg_fhs_symlink_farm ""
 	[[ "$status" -eq 1 ]]
 	[[ "$output" == *"required"* ]]
+}
+
+@test "pkg_fhs_symlink_farm: reports correct count when multiple links fail" {
+	# Register 3 files — all source paths under "files/", install them
+	pkg_fhs_register "files/myapp" "${MOCK_FHS}/usr/sbin/myapp" "750" "bin"
+	pkg_fhs_register "files/conf/app.conf" "${MOCK_FHS}/etc/myapp/app.conf" "640" "conf"
+	pkg_fhs_register "files/README" "${MOCK_FHS}/share/myapp/README" "644" "data"
+	pkg_fhs_install "$MOCK_SRC"
+
+	# Block symlink parent dir: place a file where "files/" directory needs to be
+	mkdir -p "${MOCK_LEGACY}"
+	echo "blocker" > "${MOCK_LEGACY}/files"
+
+	run pkg_fhs_symlink_farm "$MOCK_LEGACY"
+	[[ "$status" -eq 1 ]]
+	# All 3 fail (parent dir "files" is a file, not a directory).
+	# Old bug: rc=1 (boolean), reported "created 2" — wrong.
+	# Fixed: failed=3, so installed=0, no "created" message.
+	[[ "$output" != *"created 2"* ]]
+	[[ "$output" != *"created 3"* ]]
 }
 
 # ── pkg_fhs_symlink_farm_cleanup ───────────────────────────────
