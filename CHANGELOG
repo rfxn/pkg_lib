@@ -2,6 +2,21 @@ pkg_lib CHANGELOG
 ==================
 
 - v1.0.0 | Mar 06 2026:
+  [New] Packaging templates: RPM spec template (project.spec.in) with
+      @@PLACEHOLDER@@ tokens for project-specific metadata, requires,
+      scriptlets, and file lists — generalized from BFD's production spec
+  [New] DEB debian/ templates: control.in, rules.in, conffiles.in, dirs.in,
+      links.in, preinst.in, postinst.in, postrm.in, changelog.in,
+      copyright.in, source/format — generalized from BFD's debian packaging
+  [New] Docker build templates: Dockerfile.rpm-el7.in (CentOS 7),
+      Dockerfile.rpm-el9.in (Rocky 9, el8/el9/el10), Dockerfile.deb.in
+      (Debian 12), Dockerfile.test-rpm.in, Dockerfile.test-deb.in
+  [New] Makefile template (Makefile.in) with source tarball, native RPM/DEB
+      builds, Docker-based builds, and package install test targets
+  [New] Package install verification template (test-pkg-install.sh.in) with
+      FHS layout, symlink farm, permission, and execution tests
+  [New] GitHub Actions release workflow template (release.yml.in) with matrix
+      RPM (el7, el9) + DEB (debian12) builds and release asset upload
   [Fix] pkg_fhs_install/pkg_fhs_symlink_farm: use separate failure counter
       instead of boolean rc for accurate installed/linked count reporting
   [Fix] pkg_fhs_gen_sed_pairs: corrected docstring to match implementation
