@@ -2,6 +2,27 @@ pkg_lib CHANGELOG
 ==================
 
 - v1.0.0 | Mar 06 2026:
+  [New] FHS layout: pkg_fhs_register (parallel indexed array registry for
+      src/dest/mode/type file mappings), pkg_fhs_install (install registered
+      files from source to FHS paths with directory creation and permissions)
+  [New] Symlink farm: pkg_fhs_symlink_farm (create backward-compat symlinks
+      from legacy install paths to FHS locations), pkg_fhs_symlink_farm_cleanup
+      (remove symlinks and empty directories)
+  [New] Package generators: pkg_fhs_gen_rpm_files (RPM %files with
+      %config(noreplace) and %dir dedup), pkg_fhs_gen_deb_dirs (unique
+      directory listing), pkg_fhs_gen_deb_links (dest-legacy pairs),
+      pkg_fhs_gen_deb_conffiles (conf-type entries), pkg_fhs_gen_sed_pairs
+      (sed expressions for path transformation at install time)
+  [New] Uninstall primitives: pkg_uninstall_confirm (interactive y/N prompt),
+      pkg_uninstall_files (files/dirs with silent skip for missing),
+      pkg_uninstall_man (multi-location man page removal),
+      pkg_uninstall_cron (cron file removal), pkg_uninstall_logrotate,
+      pkg_uninstall_completion, pkg_uninstall_sysconfig (RHEL + Debian paths)
+  [New] Manifest support: pkg_manifest_load (source manifest file),
+      pkg_manifest_validate (check PKG_NAME/VERSION/SUMMARY/INSTALL_PATH)
+  [New] FHS layout tests (10-fhs.bats)
+  [New] Uninstall primitive tests (11-uninstall.bats)
+  [New] Manifest support tests (12-manifest.bats)
   [Fix] pkg_config_set: escape pipe character in values (sed delimiter collision
       caused silent failure when values contained |)
   [Change] Cron schedule reading: extracted _pkg_cron_read_schedule helper from

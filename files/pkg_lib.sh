@@ -2601,3 +2601,566 @@ pkg_config_clamp() {
 
 	return 0
 }
+
+# ══════════════════════════════════════════════════════════════════
+# Section: FHS Layout & Symlink Farm
+# ══════════════════════════════════════════════════════════════════
+
+# FHS registry — parallel indexed arrays (NOT declare -A)
+# Populated by pkg_fhs_register(), consumed by pkg_fhs_install() and generators.
+_PKG_FHS_SRCS=()
+_PKG_FHS_DESTS=()
+_PKG_FHS_MODES=()
+_PKG_FHS_TYPES=()
+
+# pkg_fhs_register src fhs_dest mode [type] — register a file mapping
+# Arguments:
+#   $1 — source relative path (e.g., "files/bfd")
+#   $2 — FHS destination path (e.g., "/usr/sbin/bfd")
+#   $3 — permission mode (e.g., "750")
+#   $4 — optional type: bin|lib|conf|data|state|doc (default: "data")
+# Appends to parallel indexed arrays. Returns 1 on validation failure.
+pkg_fhs_register() {
+	local src="$1" fhs_dest="$2" mode="$3" ftype="${4:-data}"
+
+	if [[ -z "$src" ]] || [[ -z "$fhs_dest" ]] || [[ -z "$mode" ]]; then
+		pkg_error "pkg_fhs_register: src, fhs_dest, and mode required"
+		return 1
+	fi
+
+	# Validate type
+	case "$ftype" in
+		bin|lib|conf|data|state|doc) ;;
+		*)
+			pkg_error "pkg_fhs_register: invalid type '${ftype}' (expected bin|lib|conf|data|state|doc)"
+			return 1
+			;;
+	esac
+
+	# Validate mode is numeric (3-4 digit octal)
+	local mode_pat='^[0-7]{3,4}$'
+	if ! [[ "$mode" =~ $mode_pat ]]; then
+		pkg_error "pkg_fhs_register: invalid mode '${mode}' (expected octal, e.g., 750)"
+		return 1
+	fi
+
+	_PKG_FHS_SRCS+=("$src")
+	_PKG_FHS_DESTS+=("$fhs_dest")
+	_PKG_FHS_MODES+=("$mode")
+	_PKG_FHS_TYPES+=("$ftype")
+
+	return 0
+}
+
+# pkg_fhs_install src_dir — install all registered files from source to FHS paths
+# Arguments:
+#   $1 — source directory root (files are resolved relative to this)
+# Copies each registered file from src_dir/src to fhs_dest with the
+# specified permission mode. Creates parent directories as needed.
+# Returns 1 on any copy failure (continues processing remaining files).
+pkg_fhs_install() {
+	local src_dir="$1"
+
+	if [[ -z "$src_dir" ]]; then
+		pkg_error "pkg_fhs_install: src_dir required"
+		return 1
+	fi
+
+	if [[ ! -d "$src_dir" ]]; then
+		pkg_error "pkg_fhs_install: source directory not found: ${src_dir}"
+		return 1
+	fi
+
+	local count=${#_PKG_FHS_SRCS[@]}
+	if [[ "$count" -eq 0 ]]; then
+		pkg_warn "pkg_fhs_install: no files registered"
+		return 0
+	fi
+
+	local i rc=0 src_path dest_path dest_dir
+	for ((i = 0; i < count; i++)); do
+		src_path="${src_dir}/${_PKG_FHS_SRCS[$i]}"
+		dest_path="${_PKG_FHS_DESTS[$i]}"
+		dest_dir="$(dirname "$dest_path")"
+
+		# Create destination directory if needed
+		if [[ ! -d "$dest_dir" ]]; then
+			mkdir -p "$dest_dir" || {
+				pkg_error "pkg_fhs_install: failed to create directory ${dest_dir}"
+				rc=1
+				continue
+			}
+		fi
+
+		# Handle directory-type sources (state dirs, etc.)
+		if [[ -d "$src_path" ]]; then
+			/usr/bin/cp -pR "$src_path" "$dest_path" || {
+				pkg_error "pkg_fhs_install: failed to copy directory ${_PKG_FHS_SRCS[$i]}"
+				rc=1
+				continue
+			}
+		elif [[ -f "$src_path" ]]; then
+			/usr/bin/cp -p "$src_path" "$dest_path" || {
+				pkg_error "pkg_fhs_install: failed to copy ${_PKG_FHS_SRCS[$i]}"
+				rc=1
+				continue
+			}
+		else
+			pkg_warn "pkg_fhs_install: source not found: ${_PKG_FHS_SRCS[$i]}"
+			rc=1
+			continue
+		fi
+
+		# Set permissions
+		chmod "${_PKG_FHS_MODES[$i]}" "$dest_path" 2>/dev/null  # best-effort chmod
+	done
+
+	local installed=$((count - rc))
+	if [[ "$installed" -gt 0 ]]; then
+		pkg_info "installed ${installed} file(s) to FHS layout"
+	fi
+
+	return "$rc"
+}
+
+# pkg_fhs_symlink_farm legacy_root — create backward-compat symlink farm
+# Arguments:
+#   $1 — legacy install root (e.g., "/usr/local/bfd")
+# Creates symlinks from legacy paths to real FHS locations for each
+# registered file. Creates parent directories under legacy_root as needed.
+# Allows old scripts and configs pointing to the legacy path to keep working.
+# Returns 1 on any symlink failure (continues processing remaining entries).
+pkg_fhs_symlink_farm() {
+	local legacy_root="$1"
+
+	if [[ -z "$legacy_root" ]]; then
+		pkg_error "pkg_fhs_symlink_farm: legacy_root required"
+		return 1
+	fi
+
+	local count=${#_PKG_FHS_SRCS[@]}
+	if [[ "$count" -eq 0 ]]; then
+		pkg_warn "pkg_fhs_symlink_farm: no files registered"
+		return 0
+	fi
+
+	local i rc=0 legacy_path dest_path link_dir
+	for ((i = 0; i < count; i++)); do
+		dest_path="${_PKG_FHS_DESTS[$i]}"
+		legacy_path="${legacy_root}/${_PKG_FHS_SRCS[$i]}"
+		link_dir="$(dirname "$legacy_path")"
+
+		# Create parent directory for the symlink
+		if [[ ! -d "$link_dir" ]]; then
+			mkdir -p "$link_dir" || {
+				pkg_error "pkg_fhs_symlink_farm: failed to create ${link_dir}"
+				rc=1
+				continue
+			}
+		fi
+
+		# Create symlink: legacy_path -> fhs_dest
+		pkg_symlink "$dest_path" "$legacy_path" || {
+			rc=1
+			continue
+		}
+	done
+
+	local linked=$((count - rc))
+	if [[ "$linked" -gt 0 ]]; then
+		pkg_info "created ${linked} backward-compat symlink(s) in ${legacy_root}"
+	fi
+
+	return "$rc"
+}
+
+# pkg_fhs_symlink_farm_cleanup legacy_root — remove symlink farm
+# Arguments:
+#   $1 — legacy install root (e.g., "/usr/local/bfd")
+# Removes symlinks created by pkg_fhs_symlink_farm(). Skips non-symlinks
+# for safety. Removes empty parent directories under legacy_root afterward.
+# Returns 0 always (best-effort cleanup).
+pkg_fhs_symlink_farm_cleanup() {
+	local legacy_root="$1"
+
+	if [[ -z "$legacy_root" ]]; then
+		pkg_error "pkg_fhs_symlink_farm_cleanup: legacy_root required"
+		return 1
+	fi
+
+	local count=${#_PKG_FHS_SRCS[@]}
+	if [[ "$count" -eq 0 ]]; then
+		return 0
+	fi
+
+	local i legacy_path
+	for ((i = 0; i < count; i++)); do
+		legacy_path="${legacy_root}/${_PKG_FHS_SRCS[$i]}"
+		if [[ -L "$legacy_path" ]]; then
+			rm -f "$legacy_path"
+		fi
+	done
+
+	# Clean up empty directories under legacy_root (bottom-up)
+	if [[ -d "$legacy_root" ]]; then
+		find "$legacy_root" -type d -empty -delete 2>/dev/null  # best-effort cleanup
+	fi
+
+	return 0
+}
+
+# pkg_fhs_gen_rpm_files — generate RPM %files section from registry
+# Outputs RPM %files lines to stdout. Config files get %config(noreplace).
+# Directories get %dir. Call after populating registry with pkg_fhs_register().
+pkg_fhs_gen_rpm_files() {
+	local count=${#_PKG_FHS_SRCS[@]}
+	if [[ "$count" -eq 0 ]]; then
+		return 0
+	fi
+
+	# Track directories we have already emitted
+	local seen_dirs="" i dest ftype dest_dir
+
+	for ((i = 0; i < count; i++)); do
+		dest="${_PKG_FHS_DESTS[$i]}"
+		ftype="${_PKG_FHS_TYPES[$i]}"
+		dest_dir="$(dirname "$dest")"
+
+		# Emit %dir for parent directory if not seen
+		case "$seen_dirs" in
+			*"|${dest_dir}|"*) ;;
+			*)
+				echo "%dir ${dest_dir}"
+				seen_dirs="${seen_dirs}|${dest_dir}|"
+				;;
+		esac
+
+		# Config files get %config(noreplace)
+		if [[ "$ftype" = "conf" ]]; then
+			echo "%config(noreplace) ${dest}"
+		else
+			echo "${dest}"
+		fi
+	done
+
+	return 0
+}
+
+# pkg_fhs_gen_deb_dirs — generate DEB dirs file from registry
+# Outputs unique directory paths (one per line) to stdout.
+pkg_fhs_gen_deb_dirs() {
+	local count=${#_PKG_FHS_SRCS[@]}
+	if [[ "$count" -eq 0 ]]; then
+		return 0
+	fi
+
+	local seen_dirs="" i dest_dir
+
+	for ((i = 0; i < count; i++)); do
+		dest_dir="$(dirname "${_PKG_FHS_DESTS[$i]}")"
+
+		# Emit directory if not seen
+		case "$seen_dirs" in
+			*"|${dest_dir}|"*) ;;
+			*)
+				echo "$dest_dir"
+				seen_dirs="${seen_dirs}|${dest_dir}|"
+				;;
+		esac
+	done
+
+	return 0
+}
+
+# pkg_fhs_gen_deb_links legacy_root — generate DEB links file from registry
+# Arguments:
+#   $1 — legacy install root (e.g., "/usr/local/bfd")
+# Outputs "fhs_dest legacy_path" pairs to stdout (DEB links format).
+pkg_fhs_gen_deb_links() {
+	local legacy_root="$1"
+
+	if [[ -z "$legacy_root" ]]; then
+		pkg_error "pkg_fhs_gen_deb_links: legacy_root required"
+		return 1
+	fi
+
+	local count=${#_PKG_FHS_SRCS[@]}
+	if [[ "$count" -eq 0 ]]; then
+		return 0
+	fi
+
+	local i dest legacy_path
+	for ((i = 0; i < count; i++)); do
+		dest="${_PKG_FHS_DESTS[$i]}"
+		legacy_path="${legacy_root}/${_PKG_FHS_SRCS[$i]}"
+		echo "${dest} ${legacy_path}"
+	done
+
+	return 0
+}
+
+# pkg_fhs_gen_deb_conffiles — generate DEB conffiles from registry (type=conf only)
+# Outputs absolute paths of config files to stdout (one per line).
+pkg_fhs_gen_deb_conffiles() {
+	local count=${#_PKG_FHS_SRCS[@]}
+	if [[ "$count" -eq 0 ]]; then
+		return 0
+	fi
+
+	local i
+	for ((i = 0; i < count; i++)); do
+		if [[ "${_PKG_FHS_TYPES[$i]}" = "conf" ]]; then
+			echo "${_PKG_FHS_DESTS[$i]}"
+		fi
+	done
+
+	return 0
+}
+
+# pkg_fhs_gen_sed_pairs install_path_var — generate sed expressions for path transform
+# Arguments:
+#   $1 — install path variable name (e.g., "INSTALL_PATH" or "inspath")
+# Outputs sed -e expressions that transform source-tree literal paths to
+# runtime variable references. Used by install.sh to patch scripts at install time.
+# Example output: -e 's|/usr/local/bfd|$INSTALL_PATH|g'
+pkg_fhs_gen_sed_pairs() {
+	local install_path_var="$1"
+
+	if [[ -z "$install_path_var" ]]; then
+		pkg_error "pkg_fhs_gen_sed_pairs: install_path_var required"
+		return 1
+	fi
+
+	local count=${#_PKG_FHS_SRCS[@]}
+	if [[ "$count" -eq 0 ]]; then
+		return 0
+	fi
+
+	# Collect unique directory prefixes from destinations
+	local seen_prefixes="" i dest_dir
+
+	for ((i = 0; i < count; i++)); do
+		dest_dir="$(dirname "${_PKG_FHS_DESTS[$i]}")"
+
+		case "$seen_prefixes" in
+			*"|${dest_dir}|"*) ;;
+			*)
+				echo "-e 's|${dest_dir}|\$${install_path_var}|g'"
+				seen_prefixes="${seen_prefixes}|${dest_dir}|"
+				;;
+		esac
+	done
+
+	return 0
+}
+
+# ══════════════════════════════════════════════════════════════════
+# Section: Uninstall Primitives
+# ══════════════════════════════════════════════════════════════════
+
+# pkg_uninstall_confirm project_name — interactive y/N confirmation prompt
+# Arguments:
+#   $1 — project name (e.g., "BFD", "APF")
+# Reads from stdin. Returns 0 if confirmed (y/Y), 1 if declined or non-interactive.
+pkg_uninstall_confirm() {
+	local project_name="$1"
+
+	if [[ -z "$project_name" ]]; then
+		pkg_error "pkg_uninstall_confirm: project_name required"
+		return 1
+	fi
+
+	local answer=""
+	echo ""
+	read -r -p "  Are you sure you want to uninstall ${project_name}? [y/N] " answer
+	echo ""
+
+	case "$answer" in
+		y|Y) return 0 ;;
+		*)   return 1 ;;
+	esac
+}
+
+# pkg_uninstall_files paths... — remove files and directories
+# Arguments:
+#   $1+ — file or directory paths to remove
+# Skips paths that do not exist (no error). Removes files with rm -f,
+# directories with rm -rf. Returns 0 always (best-effort removal).
+pkg_uninstall_files() {
+	if [[ $# -eq 0 ]]; then
+		pkg_error "pkg_uninstall_files: at least one path required"
+		return 1
+	fi
+
+	local path
+	for path in "$@"; do
+		if [[ ! -e "$path" ]] && [[ ! -L "$path" ]]; then
+			continue  # skip non-existent paths silently
+		fi
+
+		if [[ -d "$path" ]] && [[ ! -L "$path" ]]; then
+			rm -rf "$path" || pkg_warn "pkg_uninstall_files: failed to remove directory ${path}"
+		else
+			rm -f "$path" || pkg_warn "pkg_uninstall_files: failed to remove ${path}"
+		fi
+	done
+
+	return 0
+}
+
+# pkg_uninstall_man section name — remove installed man page
+# Arguments:
+#   $1 — man section number (e.g., "1", "8")
+#   $2 — man page name without section (e.g., "maldet", "bfd")
+# Removes both uncompressed and gzipped man pages from standard locations.
+# Returns 0 always (best-effort removal).
+pkg_uninstall_man() {
+	local section="$1" name="$2"
+
+	if [[ -z "$section" ]] || [[ -z "$name" ]]; then
+		pkg_error "pkg_uninstall_man: section and name required"
+		return 1
+	fi
+
+	local man_dirs="/usr/share/man /usr/local/share/man /usr/local/man"
+	local dir
+	for dir in $man_dirs; do
+		rm -f "${dir}/man${section}/${name}.${section}" 2>/dev/null     # uncompressed
+		rm -f "${dir}/man${section}/${name}.${section}.gz" 2>/dev/null  # gzipped
+	done
+
+	return 0
+}
+
+# pkg_uninstall_cron paths... — remove cron files
+# Arguments:
+#   $1+ — cron file paths to remove (e.g., "/etc/cron.d/bfd", "/etc/cron.daily/bfd")
+# Skips paths that do not exist. Returns 0 always (best-effort removal).
+pkg_uninstall_cron() {
+	if [[ $# -eq 0 ]]; then
+		pkg_error "pkg_uninstall_cron: at least one path required"
+		return 1
+	fi
+
+	local path
+	for path in "$@"; do
+		if [[ -f "$path" ]] || [[ -L "$path" ]]; then
+			rm -f "$path" || pkg_warn "pkg_uninstall_cron: failed to remove ${path}"
+		fi
+	done
+
+	return 0
+}
+
+# pkg_uninstall_logrotate name — remove logrotate config
+# Arguments:
+#   $1 — logrotate config name (e.g., "bfd", "maldet")
+# Removes /etc/logrotate.d/$name.
+# Returns 0 always (best-effort removal).
+pkg_uninstall_logrotate() {
+	local name="$1"
+
+	if [[ -z "$name" ]]; then
+		pkg_error "pkg_uninstall_logrotate: name required"
+		return 1
+	fi
+
+	rm -f "/etc/logrotate.d/${name}" 2>/dev/null  # best-effort removal
+	return 0
+}
+
+# pkg_uninstall_completion name — remove bash completion file
+# Arguments:
+#   $1 — completion script name (e.g., "bfd", "maldet")
+# Removes /etc/bash_completion.d/$name.
+# Returns 0 always (best-effort removal).
+pkg_uninstall_completion() {
+	local name="$1"
+
+	if [[ -z "$name" ]]; then
+		pkg_error "pkg_uninstall_completion: name required"
+		return 1
+	fi
+
+	rm -f "/etc/bash_completion.d/${name}" 2>/dev/null  # best-effort removal
+	return 0
+}
+
+# pkg_uninstall_sysconfig name — remove sysconfig/default override file
+# Arguments:
+#   $1 — service name (e.g., "bfd", "apf")
+# Removes /etc/sysconfig/$name (RHEL) and /etc/default/$name (Debian).
+# Returns 0 always (best-effort removal).
+pkg_uninstall_sysconfig() {
+	local name="$1"
+
+	if [[ -z "$name" ]]; then
+		pkg_error "pkg_uninstall_sysconfig: name required"
+		return 1
+	fi
+
+	rm -f "/etc/sysconfig/${name}" 2>/dev/null  # RHEL-family
+	rm -f "/etc/default/${name}" 2>/dev/null    # Debian-family
+	return 0
+}
+
+# ══════════════════════════════════════════════════════════════════
+# Section: Manifest Support
+# ══════════════════════════════════════════════════════════════════
+
+# pkg_manifest_load manifest_file — source a project manifest file
+# Arguments:
+#   $1 — path to manifest file (e.g., "pkg.manifest")
+# Sources the file to set PKG_* variables. The manifest file is a plain
+# bash variable assignment file (key="value" per line).
+# Returns 1 if file not found or source fails.
+pkg_manifest_load() {
+	local manifest_file="$1"
+
+	if [[ -z "$manifest_file" ]]; then
+		pkg_error "pkg_manifest_load: manifest_file required"
+		return 1
+	fi
+
+	if [[ ! -f "$manifest_file" ]]; then
+		pkg_error "pkg_manifest_load: file not found: ${manifest_file}"
+		return 1
+	fi
+
+	# shellcheck disable=SC1090
+	source "$manifest_file" || {
+		pkg_error "pkg_manifest_load: failed to source ${manifest_file}"
+		return 1
+	}
+
+	return 0
+}
+
+# pkg_manifest_validate — validate required manifest variables are set
+# Checks that PKG_NAME, PKG_VERSION, PKG_SUMMARY, and PKG_INSTALL_PATH
+# are non-empty. Returns 1 if any required variable is missing.
+pkg_manifest_validate() {
+	local rc=0
+
+	if [[ -z "${PKG_NAME:-}" ]]; then
+		pkg_error "pkg_manifest_validate: PKG_NAME is required"
+		rc=1
+	fi
+
+	if [[ -z "${PKG_VERSION:-}" ]]; then
+		pkg_error "pkg_manifest_validate: PKG_VERSION is required"
+		rc=1
+	fi
+
+	if [[ -z "${PKG_SUMMARY:-}" ]]; then
+		pkg_error "pkg_manifest_validate: PKG_SUMMARY is required"
+		rc=1
+	fi
+
+	if [[ -z "${PKG_INSTALL_PATH:-}" ]]; then
+		pkg_error "pkg_manifest_validate: PKG_INSTALL_PATH is required"
+		rc=1
+	fi
+
+	return "$rc"
+}

@@ -60,6 +60,12 @@ pkg_common_setup() {
 	PKG_SLACKWARE_PRIORITY="95"
 	_PKG_RCLOCAL_PATHS="/etc/rc.local /etc/rc.d/rc.local"
 
+	# Reset FHS registry arrays for test isolation
+	_PKG_FHS_SRCS=()
+	_PKG_FHS_DESTS=()
+	_PKG_FHS_MODES=()
+	_PKG_FHS_TYPES=()
+
 	# Reset cron management defaults (no persistent state — functions are stateless)
 
 	# Reset config migration defaults (no persistent state — functions are stateless)
