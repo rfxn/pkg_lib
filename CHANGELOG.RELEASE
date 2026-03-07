@@ -1,5 +1,13 @@
 pkg_lib v1.0.1 | Mar 07 2026:
 
+  [New] README: add integration guide with install.sh/uninstall.sh boilerplate
+      templates, config migration pattern, and consumer project references
+  [New] README: add use cases section covering fresh install, upgrade with
+      backup, multi-service install, FHS layout with symlink farm, and package
+      generation workflows with code snippets
+  [New] README: add troubleshooting section covering backup collision, service
+      not starting, OS detection issues, symlink farm, config merge, and
+      CentOS 6 known issues
   [Fix] pkg_sed_replace: escape | delimiter in old_path and new_path arguments
       before sed substitution, matching the escaping pattern from pkg_config_set
   [Change] pkg_backup_prune: replace ls -1 directory enumeration with find

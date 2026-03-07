@@ -132,6 +132,243 @@ pkg_service_enable "myproject"
 pkg_success "MyProject 2.0.1 installed successfully"
 ```
 
+## Integration Guide
+
+This section describes how to structure `install.sh` and `uninstall.sh` using
+pkg_lib primitives. BFD, APF, and LMD all follow this pattern.
+
+### Structuring install.sh
+
+A typical installer sources pkg_lib.sh, then calls primitives in a fixed order.
+The pattern handles both fresh installs and upgrades:
+
+```bash
+#!/bin/bash
+set -eu
+cd "$(dirname "$0")"
+
+INSPATH="${INSTALL_PATH:-/usr/local/myproject}"
+BINPATH="${BIN_PATH:-/usr/local/sbin/myproject}"
+VER="2.0.1"
+
+[ "$(id -u)" -ne 0 ] && { echo "error: must be root"; exit 1; }
+
+# Optional: set PKG_BACKUP_SYMLINK before sourcing to customize
+# shellcheck disable=SC1091
+. ./files/internals/pkg_lib.sh
+
+install_files() {
+    rm -rf "$INSPATH"
+    pkg_copy_tree "./files" "$INSPATH"
+    pkg_set_perms "$INSPATH" "750" "640" "myproject"
+    pkg_create_dirs "750" "$INSPATH/tmp"
+
+    # CLI symlink
+    mkdir -p "$(dirname "$BINPATH")"
+    pkg_symlink "$INSPATH/myproject" "$BINPATH"
+
+    # Cron, logrotate, man page, bash completion
+    pkg_cron_install "cron" "/etc/cron.d/myproject"
+    pkg_logrotate_install "logrotate.d.myproject" "myproject"
+    pkg_man_install "myproject.1" "1" "myproject"
+    pkg_bash_completion "myproject.bash-completion" "myproject"
+
+    # Services: systemd units or SysV init fallback
+    pkg_detect_init
+    pkg_service_install_multi "myproject" "myproject.service" "myproject.timer"
+}
+
+if [ -d "$INSPATH" ]; then
+    # Upgrade path
+    pkg_header "MyProject" "$VER" "upgrade"
+    pkg_section "Backing up existing installation"
+    pkg_backup "$INSPATH"
+    pkg_section "Installing files"
+    install_files
+    pkg_section "Importing configuration"
+    BK_LAST=$(pkg_backup_path "$INSPATH") ./importconf
+    pkg_success "MyProject ${VER} upgrade complete"
+else
+    # Fresh install
+    pkg_header "MyProject" "$VER" "install"
+    pkg_section "Installing files"
+    install_files
+    pkg_success "MyProject ${VER} installation complete"
+fi
+```
+
+Key points:
+- Call `pkg_detect_os` and `pkg_detect_init` before service/package operations
+- Use `pkg_backup` before overwriting an existing install directory
+- Call `pkg_copy_tree` or `pkg_fhs_install` for file placement
+- Use `pkg_service_install_multi` for multi-unit service bundles
+- Use `pkg_cron_install` for cron.d and cron.daily entries
+- Call `pkg_success` at the end to print a styled success message
+
+### Structuring uninstall.sh
+
+The uninstaller sources pkg_lib from the installed location (with a fallback to
+the source tree), confirms with the user, then removes all artifacts:
+
+```bash
+#!/bin/bash
+INSPATH="${INSTALL_PATH:-/usr/local/myproject}"
+BINPATH="${BIN_PATH:-/usr/local/sbin/myproject}"
+
+[ "$(id -u)" -ne 0 ] && { echo "error: must be root"; exit 1; }
+
+# Source from install path first, fall back to source tree
+if [ -f "$INSPATH/internals/pkg_lib.sh" ]; then
+    # shellcheck disable=SC1091
+    . "$INSPATH/internals/pkg_lib.sh"
+elif [ -f "files/internals/pkg_lib.sh" ]; then
+    # shellcheck disable=SC1091
+    . ./files/internals/pkg_lib.sh
+fi
+
+pkg_uninstall_confirm "MyProject" || exit 0
+
+if [ -d "$INSPATH" ]; then
+    # Remove services (systemd + SysV)
+    pkg_service_uninstall_multi "myproject" "myproject-watch"
+
+    # Remove man page, bash completion, logrotate
+    pkg_uninstall_man "1" "myproject"
+    pkg_uninstall_completion "myproject"
+    pkg_uninstall_logrotate "myproject"
+
+    # Remove cron files
+    pkg_uninstall_cron /etc/cron.d/myproject /etc/cron.daily/myproject
+
+    # Remove install dir, backups, CLI symlink, log files
+    pkg_uninstall_files "$INSPATH".bk.* "$INSPATH" "$BINPATH" /var/log/myproject.log
+
+    pkg_success "MyProject has been uninstalled."
+else
+    echo "MyProject does not appear to be installed."
+fi
+```
+
+### Config Migration Pattern
+
+On upgrade, use `pkg_config_merge` to preserve user settings while adding new
+variables from the current template:
+
+```bash
+# In importconf (called after install_files during upgrade):
+BK_LAST="${BK_LAST:-}"
+[ -z "$BK_LAST" ] && { echo "No backup path provided"; exit 1; }
+
+# Merge old config values into new template
+pkg_config_merge "$BK_LAST/conf.myproject" "$INSPATH/conf.myproject" \
+    "$INSPATH/conf.myproject"
+
+# Rename deprecated variables
+pkg_config_migrate_var "$INSPATH/conf.myproject" "OLD_VAR" "NEW_VAR"
+
+# Clamp numeric values to safe maximums
+pkg_config_clamp "$INSPATH/conf.myproject" "MAX_THREADS" 64
+```
+
+The AWK merge preserves all old values for matching keys and keeps new template
+structure, comments, and any newly added variables.
+
+## Use Cases
+
+### Fresh Install
+
+Detect the OS, check dependencies, copy files, install services, report success:
+
+```bash
+. ./files/internals/pkg_lib.sh
+pkg_header "MyProject" "1.0.0" "install"
+pkg_detect_os
+pkg_detect_init
+pkg_check_dep "curl" "curl" "curl" "required"
+pkg_copy_tree "./files" "/usr/local/myproject"
+pkg_set_perms "/usr/local/myproject" "750" "640" "bin/myproject"
+pkg_service_install "myproject" "myproject.service"
+pkg_service_enable "myproject"
+pkg_success "MyProject 1.0.0 installed"
+```
+
+### Upgrade with Backup
+
+Back up the old install, copy new files, restore user configuration, restart:
+
+```bash
+pkg_header "MyProject" "2.0.0" "upgrade"
+pkg_backup "/usr/local/myproject"
+rm -rf "/usr/local/myproject"
+pkg_copy_tree "./files" "/usr/local/myproject"
+BK_LAST=$(pkg_backup_path "/usr/local/myproject")
+pkg_config_merge "$BK_LAST/conf.myproject" \
+    "/usr/local/myproject/conf.myproject" \
+    "/usr/local/myproject/conf.myproject"
+pkg_service_restart "myproject"
+pkg_success "MyProject 2.0.0 upgrade complete"
+```
+
+### Multi-Service Install
+
+Install systemd units with SysV fallback, plus cron and logrotate:
+
+```bash
+pkg_detect_init
+pkg_service_install_multi "myproject" \
+    "myproject.service" "myproject.timer"
+if [ -f "myproject-watch.init" ]; then
+    pkg_service_install "myproject-watch" "myproject-watch.init"
+fi
+pkg_cron_install "cron" "/etc/cron.d/myproject"
+pkg_cron_install "cron.daily" "/etc/cron.daily/myproject"
+pkg_logrotate_install "logrotate.d.myproject" "myproject"
+```
+
+### FHS Layout with Symlink Farm
+
+Register files for FHS-compliant paths, install them, then create backward-compat
+symlinks at the legacy location:
+
+```bash
+# Register file mappings: source -> FHS destination
+pkg_fhs_register "bin/myproject" "/usr/bin/myproject" "755" "bin"
+pkg_fhs_register "conf.myproject" "/etc/myproject/conf.myproject" "640" "conf"
+pkg_fhs_register "myproject.1" "/usr/share/man/man1/myproject.1.gz" "644" "doc"
+
+# Install files to FHS destinations
+pkg_fhs_install "./files"
+
+# Create legacy symlinks: /usr/local/myproject/bin/myproject -> /usr/bin/myproject
+pkg_fhs_symlink_farm "/usr/local/myproject"
+```
+
+### Package Generation
+
+Write a manifest, then run `pkg_gen.sh` to produce RPM/DEB specs and build
+infrastructure:
+
+```bash
+# pkg.manifest
+PKG_NAME="myproject"
+PKG_VERSION="2.0.1"
+PKG_SUMMARY="My project"
+PKG_INSTALL_PATH="/usr/local/myproject"
+PKG_HAS_SYSTEMD_SERVICE="1"
+PKG_HAS_CRON_D="1"
+```
+
+```bash
+# Generate all packaging artifacts
+./pkg/pkg_gen.sh \
+    --manifest ./pkg.manifest \
+    --templates ./pkg/templates \
+    --output ./pkg
+
+# Produces: pkg/rpm/myproject.spec, pkg/deb/debian/*, pkg/docker/*,
+#           pkg/Makefile, pkg/.github/workflows/release.yml
+```
+
 ## Configuration Variables
 
 All behavior is controlled via `PKG_*` environment variables. Set these before
@@ -442,3 +679,55 @@ is a test environment issue, not a library bug.
 
 CentOS 6+, Rocky 8/9/10, Ubuntu 12.04-24.04, Debian 12, Gentoo,
 Slackware, FreeBSD (partial -- service management excluded).
+
+## Troubleshooting
+
+### Backup Collision
+
+If two installs run within the same second, `pkg_backup` detects the collision
+and appends a `-N` suffix (e.g., `myproject.07032026-1709834567-1`). If the
+target directory still exists after backup, remove it before copying:
+`rm -rf "$INSPATH"` after `pkg_backup` returns.
+
+### Service Not Starting
+
+Verify the init system was detected correctly: call `pkg_detect_init` then
+inspect `$_PKG_INIT_SYSTEM` (values: `systemd`, `sysv`, `upstart`, `rc.local`).
+On systemd hosts, ensure `systemctl daemon-reload` runs after any sed path
+replacements in unit files. On SysV hosts, confirm the init script is in
+`/etc/rc.d/init.d/` or `/etc/init.d/`.
+
+### Detection Reports Wrong OS
+
+`pkg_detect_os` reads `/etc/os-release` first, then falls back to legacy files
+(`/etc/redhat-release`, `/etc/debian_version`, etc.). Inspect the cached
+variables after detection: `$_PKG_OS_FAMILY`, `$_PKG_OS_ID`, `$_PKG_OS_VERSION`,
+`$_PKG_OS_NAME`. On minimal Docker images that lack `/etc/os-release`, the
+fallback chain determines the family. Override detection by setting these
+variables before calling any pkg_lib function.
+
+### Symlink Farm Broken
+
+`pkg_fhs_symlink_farm` creates symlinks from `legacy_root/src` pointing to the
+FHS `dest` path. If symlinks point to missing targets, verify that `pkg_fhs_install`
+ran first to copy files to their FHS destinations. If paths look wrong, check
+the `pkg_fhs_register` calls: `src` is relative to the source root, `dest` is
+the absolute FHS path. Use `pkg_fhs_symlink_farm_cleanup` to remove a broken
+farm before re-creating it.
+
+### Config Merge Loses Values
+
+`pkg_config_merge` uses AWK to merge old values into a new template. It matches
+on the variable name before `=` and preserves the old value verbatim. Values
+containing unbalanced quotes, literal `=` signs in the value portion, or lines
+that do not follow `KEY=VALUE` format are skipped during merge. Comments and
+blank lines from the new template are always preserved. If a variable is missing
+after merge, verify its key name matches exactly between old and new configs.
+
+### CentOS 6 Failures
+
+The CentOS 6 Docker image is missing `/usr/bin/cp`, which causes failures in
+`pkg_copy_tree`, `pkg_backup` (copy method), and service install operations.
+This is a test environment limitation, not a library bug. On real CentOS 6
+hosts, `/usr/bin/cp` is provided by coreutils. Legacy init fallback
+(`sysv`/`chkconfig`) works correctly on CentOS 6 when binaries are present.
