@@ -1047,3 +1047,829 @@ pkg_tmpfile() {
 	echo "$tmpfile"
 	return 0
 }
+
+# ══════════════════════════════════════════════════════════════════
+# Section: Service Lifecycle
+# ══════════════════════════════════════════════════════════════════
+
+# --- Environment defaults ---
+PKG_CHKCONFIG_LEVELS="${PKG_CHKCONFIG_LEVELS:-345}"
+PKG_UPDATERCD_START="${PKG_UPDATERCD_START:-95}"
+PKG_UPDATERCD_STOP="${PKG_UPDATERCD_STOP:-05}"
+PKG_SYSTEMD_UNIT_DIR="${PKG_SYSTEMD_UNIT_DIR:-}"          # empty = auto-detect
+PKG_SLACKWARE_RUNLEVELS="${PKG_SLACKWARE_RUNLEVELS:-2 3 4 5}"
+PKG_SLACKWARE_PRIORITY="${PKG_SLACKWARE_PRIORITY:-95}"
+
+# Private: rc.local search paths (override in tests)
+_PKG_RCLOCAL_PATHS="${_PKG_RCLOCAL_PATHS:-/etc/rc.local /etc/rc.d/rc.local}"
+
+# --- Internal helpers ---
+
+# _pkg_systemd_unit_dir — resolve systemd unit directory
+# Priority: PKG_SYSTEMD_UNIT_DIR env var → /usr/lib/systemd/system → /lib/systemd/system
+# Returns 1 if no directory found.
+_pkg_systemd_unit_dir() {
+	# Env var override
+	if [[ -n "$PKG_SYSTEMD_UNIT_DIR" ]]; then
+		echo "$PKG_SYSTEMD_UNIT_DIR"
+		return 0
+	fi
+
+	# Auto-detect: RHEL-family first, then Debian-family
+	if [[ -d /usr/lib/systemd/system ]]; then
+		echo "/usr/lib/systemd/system"
+		return 0
+	fi
+	if [[ -d /lib/systemd/system ]]; then
+		echo "/lib/systemd/system"
+		return 0
+	fi
+
+	return 1
+}
+
+# _pkg_init_script_path name — resolve SysV init script path
+# Arguments:
+#   $1 — service name
+# Checks /etc/rc.d/init.d/$name then /etc/init.d/$name.
+# Returns 1 if neither exists.
+_pkg_init_script_path() {
+	local name="$1"
+
+	if [[ -f "/etc/rc.d/init.d/${name}" ]]; then
+		echo "/etc/rc.d/init.d/${name}"
+		return 0
+	fi
+	if [[ -f "/etc/init.d/${name}" ]]; then
+		echo "/etc/init.d/${name}"
+		return 0
+	fi
+
+	return 1
+}
+
+# _pkg_service_ctl action name — shared start/stop/restart cascade
+# Arguments:
+#   $1 — action (start|stop|restart)
+#   $2 — service name
+# Cascade: systemd → SysV init script → error
+# Returns 1 if no init method found.
+_pkg_service_ctl() {
+	local action="$1" name="$2"
+
+	# systemd path
+	if command -v systemctl >/dev/null 2>&1; then
+		systemctl "$action" "$name" 2>/dev/null  # may fail if unit missing
+		return $?
+	fi
+
+	# SysV path
+	local init_script
+	if init_script=$(_pkg_init_script_path "$name"); then
+		"$init_script" "$action"
+		return $?
+	fi
+
+	pkg_error "no init method found for service: ${name}"
+	return 1
+}
+
+# --- Service install/uninstall ---
+
+# pkg_service_install name source_file — install unit or init script
+# Arguments:
+#   $1 — service name
+#   $2 — source file path (unit file or init script)
+# Copies to correct location based on detected init system.
+# For systemd: copies to unit dir, runs daemon-reload.
+# For SysV: copies to init.d, chmod 755.
+# Returns 1 on failure.
+pkg_service_install() {
+	local name="$1" source_file="$2"
+
+	if [[ -z "$name" ]] || [[ -z "$source_file" ]]; then
+		pkg_error "pkg_service_install: name and source_file required"
+		return 1
+	fi
+
+	# FreeBSD guard
+	pkg_detect_os
+	if [[ "$_PKG_OS_ID" = "freebsd" ]]; then
+		pkg_warn "FreeBSD service management not supported"
+		return 1
+	fi
+
+	if [[ ! -f "$source_file" ]]; then
+		pkg_error "pkg_service_install: source file not found: ${source_file}"
+		return 1
+	fi
+
+	pkg_detect_init
+
+	if [[ "$_PKG_INIT_SYSTEM" = "systemd" ]]; then
+		local unit_dir
+		if ! unit_dir=$(_pkg_systemd_unit_dir); then
+			pkg_error "pkg_service_install: cannot locate systemd unit directory"
+			return 1
+		fi
+		local basename_file
+		basename_file=$(basename "$source_file")
+		/usr/bin/cp -f "$source_file" "${unit_dir}/${basename_file}" || {
+			pkg_error "pkg_service_install: failed to copy unit file to ${unit_dir}"
+			return 1
+		}
+		systemctl daemon-reload 2>/dev/null  # safe: no-op if systemctl unavailable
+		return 0
+	fi
+
+	# SysV: determine init.d directory
+	local init_dir="/etc/init.d"
+	if [[ -d /etc/rc.d/init.d ]]; then
+		init_dir="/etc/rc.d/init.d"
+	fi
+	/usr/bin/cp -f "$source_file" "${init_dir}/${name}" || {
+		pkg_error "pkg_service_install: failed to copy init script to ${init_dir}"
+		return 1
+	}
+	chmod 755 "${init_dir}/${name}"
+
+	return 0
+}
+
+# pkg_service_uninstall name — exhaustive removal from ALL locations
+# Arguments:
+#   $1 — service name
+# Removes unit files, init scripts, chkconfig entries, update-rc.d entries,
+# rc-update entries, Slackware S-links, and rc.local entries.
+# Returns 0 always (best-effort cleanup).
+pkg_service_uninstall() {
+	local name="$1"
+
+	if [[ -z "$name" ]]; then
+		pkg_error "pkg_service_uninstall: name required"
+		return 1
+	fi
+
+	# FreeBSD guard
+	pkg_detect_os
+	if [[ "$_PKG_OS_ID" = "freebsd" ]]; then
+		pkg_warn "FreeBSD service management not supported"
+		return 1
+	fi
+
+	# 1. systemd: stop + disable + remove unit files + daemon-reload
+	if command -v systemctl >/dev/null 2>&1; then
+		systemctl stop "$name" 2>/dev/null     # safe: ignore if not running
+		systemctl disable "$name" 2>/dev/null   # safe: ignore if not enabled
+	fi
+
+	rm -f "/usr/lib/systemd/system/${name}.service" 2>/dev/null  # safe: may not exist
+	rm -f "/lib/systemd/system/${name}.service" 2>/dev/null      # safe: may not exist
+	rm -f "/usr/lib/systemd/system/${name}.timer" 2>/dev/null    # safe: timer variant
+	rm -f "/lib/systemd/system/${name}.timer" 2>/dev/null        # safe: timer variant
+
+	if command -v systemctl >/dev/null 2>&1; then
+		systemctl daemon-reload 2>/dev/null  # safe: refresh after removal
+	fi
+
+	# 2. SysV: stop via init script if exists
+	local init_script
+	if init_script=$(_pkg_init_script_path "$name"); then
+		"$init_script" stop 2>/dev/null  # safe: ignore if already stopped
+	fi
+
+	# 3. chkconfig: permanent removal
+	if command -v chkconfig >/dev/null 2>&1; then
+		chkconfig --del "$name" 2>/dev/null  # safe: ignore if not registered
+	fi
+
+	# 4. update-rc.d: remove
+	if command -v update-rc.d >/dev/null 2>&1; then
+		update-rc.d -f "$name" remove 2>/dev/null  # safe: ignore if not registered
+	fi
+
+	# 5. rc-update: remove (Gentoo)
+	if command -v rc-update >/dev/null 2>&1; then
+		rc-update del "$name" default 2>/dev/null  # safe: ignore if not registered
+	fi
+
+	# 6. Remove init scripts from both possible locations
+	rm -f "/etc/init.d/${name}" 2>/dev/null          # safe: may not exist
+	rm -f "/etc/rc.d/init.d/${name}" 2>/dev/null     # safe: may not exist
+
+	# 7. Slackware S-links
+	local rl rc_dir
+	for rl in 2 3 4 5; do
+		rc_dir="/etc/rc.d/rc${rl}.d"
+		if [[ -d "$rc_dir" ]]; then
+			rm -f "${rc_dir}/"S*"${name}" 2>/dev/null  # safe: glob may match nothing
+		fi
+	done
+
+	# 8. rc.local cleanup
+	pkg_rclocal_remove "$name"
+
+	return 0
+}
+
+# pkg_service_install_timer name source_file — install systemd timer unit
+# Arguments:
+#   $1 — timer name (without .timer suffix)
+#   $2 — source timer file path
+# Returns 1 if not systemd or on failure.
+pkg_service_install_timer() {
+	local name="$1" source_file="$2"
+
+	if [[ -z "$name" ]] || [[ -z "$source_file" ]]; then
+		pkg_error "pkg_service_install_timer: name and source_file required"
+		return 1
+	fi
+
+	# FreeBSD guard
+	pkg_detect_os
+	if [[ "$_PKG_OS_ID" = "freebsd" ]]; then
+		pkg_warn "FreeBSD service management not supported"
+		return 1
+	fi
+
+	pkg_detect_init
+
+	if [[ "$_PKG_INIT_SYSTEM" != "systemd" ]]; then
+		pkg_warn "pkg_service_install_timer: timers require systemd (detected: ${_PKG_INIT_SYSTEM})"
+		return 1
+	fi
+
+	if [[ ! -f "$source_file" ]]; then
+		pkg_error "pkg_service_install_timer: source file not found: ${source_file}"
+		return 1
+	fi
+
+	local unit_dir
+	if ! unit_dir=$(_pkg_systemd_unit_dir); then
+		pkg_error "pkg_service_install_timer: cannot locate systemd unit directory"
+		return 1
+	fi
+
+	local basename_file
+	basename_file=$(basename "$source_file")
+	/usr/bin/cp -f "$source_file" "${unit_dir}/${basename_file}" || {
+		pkg_error "pkg_service_install_timer: failed to copy timer to ${unit_dir}"
+		return 1
+	}
+	systemctl daemon-reload 2>/dev/null  # safe: refresh unit cache
+
+	return 0
+}
+
+# pkg_service_install_multi name source_files... — install multiple related units
+# Arguments:
+#   $1 — service name (for logging)
+#   $2+ — source file paths (service, timer, path units, etc.)
+# Installs each file via pkg_service_install or pkg_service_install_timer
+# based on file extension. Returns 1 if any install fails.
+pkg_service_install_multi() {
+	local name="$1"
+	shift
+
+	if [[ -z "$name" ]] || [[ $# -eq 0 ]]; then
+		pkg_error "pkg_service_install_multi: name and at least one source file required"
+		return 1
+	fi
+
+	# FreeBSD guard
+	pkg_detect_os
+	if [[ "$_PKG_OS_ID" = "freebsd" ]]; then
+		pkg_warn "FreeBSD service management not supported"
+		return 1
+	fi
+
+	local source_file rc=0
+	local timer_pat='\.timer$'
+	for source_file in "$@"; do
+		if [[ "$source_file" =~ $timer_pat ]]; then
+			pkg_service_install_timer "$name" "$source_file" || rc=1
+		else
+			pkg_service_install "$name" "$source_file" || rc=1
+		fi
+	done
+
+	return "$rc"
+}
+
+# pkg_service_uninstall_multi name suffixes... — uninstall multiple related units
+# Arguments:
+#   $1 — service name
+#   $2+ — unit suffixes to remove (e.g., ".service" ".timer" ".path")
+# Removes each unit file from all systemd unit dirs and runs daemon-reload once.
+# Returns 0 always (best-effort cleanup).
+pkg_service_uninstall_multi() {
+	local name="$1"
+	shift
+
+	if [[ -z "$name" ]] || [[ $# -eq 0 ]]; then
+		pkg_error "pkg_service_uninstall_multi: name and at least one suffix required"
+		return 1
+	fi
+
+	# FreeBSD guard
+	pkg_detect_os
+	if [[ "$_PKG_OS_ID" = "freebsd" ]]; then
+		pkg_warn "FreeBSD service management not supported"
+		return 1
+	fi
+
+	local suffix
+	for suffix in "$@"; do
+		# Stop + disable each unit if systemctl available
+		if command -v systemctl >/dev/null 2>&1; then
+			systemctl stop "${name}${suffix}" 2>/dev/null    # safe: may not be running
+			systemctl disable "${name}${suffix}" 2>/dev/null  # safe: may not be enabled
+		fi
+		# Remove from both possible systemd dirs
+		rm -f "/usr/lib/systemd/system/${name}${suffix}" 2>/dev/null  # safe: may not exist
+		rm -f "/lib/systemd/system/${name}${suffix}" 2>/dev/null      # safe: may not exist
+	done
+
+	# Single daemon-reload after all removals
+	if command -v systemctl >/dev/null 2>&1; then
+		systemctl daemon-reload 2>/dev/null  # safe: refresh after bulk removal
+	fi
+
+	return 0
+}
+
+# --- Service control ---
+
+# pkg_service_start name — start service now
+# Arguments:
+#   $1 — service name
+pkg_service_start() {
+	local name="$1"
+
+	if [[ -z "$name" ]]; then
+		pkg_error "pkg_service_start: name required"
+		return 1
+	fi
+
+	# FreeBSD guard
+	pkg_detect_os
+	if [[ "$_PKG_OS_ID" = "freebsd" ]]; then
+		pkg_warn "FreeBSD service management not supported"
+		return 1
+	fi
+
+	_pkg_service_ctl "start" "$name"
+}
+
+# pkg_service_stop name — stop service now
+# Arguments:
+#   $1 — service name
+pkg_service_stop() {
+	local name="$1"
+
+	if [[ -z "$name" ]]; then
+		pkg_error "pkg_service_stop: name required"
+		return 1
+	fi
+
+	# FreeBSD guard
+	pkg_detect_os
+	if [[ "$_PKG_OS_ID" = "freebsd" ]]; then
+		pkg_warn "FreeBSD service management not supported"
+		return 1
+	fi
+
+	_pkg_service_ctl "stop" "$name"
+}
+
+# pkg_service_restart name — restart service now
+# Arguments:
+#   $1 — service name
+pkg_service_restart() {
+	local name="$1"
+
+	if [[ -z "$name" ]]; then
+		pkg_error "pkg_service_restart: name required"
+		return 1
+	fi
+
+	# FreeBSD guard
+	pkg_detect_os
+	if [[ "$_PKG_OS_ID" = "freebsd" ]]; then
+		pkg_warn "FreeBSD service management not supported"
+		return 1
+	fi
+
+	_pkg_service_ctl "restart" "$name"
+}
+
+# pkg_service_status name — check if service is running
+# Arguments:
+#   $1 — service name
+# Returns 0 if running, 1 if stopped or unknown.
+pkg_service_status() {
+	local name="$1"
+
+	if [[ -z "$name" ]]; then
+		pkg_error "pkg_service_status: name required"
+		return 1
+	fi
+
+	# FreeBSD guard
+	pkg_detect_os
+	if [[ "$_PKG_OS_ID" = "freebsd" ]]; then
+		pkg_warn "FreeBSD service management not supported"
+		return 1
+	fi
+
+	# systemd path
+	if command -v systemctl >/dev/null 2>&1; then
+		systemctl is-active --quiet "$name" 2>/dev/null  # returns 0=active, non-zero=inactive
+		return $?
+	fi
+
+	# SysV path
+	local init_script
+	if init_script=$(_pkg_init_script_path "$name"); then
+		"$init_script" status >/dev/null 2>&1
+		return $?
+	fi
+
+	return 1
+}
+
+# --- Service configuration ---
+
+# pkg_service_enable name — enable service at boot
+# Arguments:
+#   $1 — service name
+# Cascade: systemd → chkconfig (RHEL) → update-rc.d (Debian) →
+#   rc-update (Gentoo) → Slackware S-links → unsupported
+# Returns 1 on failure.
+pkg_service_enable() {
+	local name="$1"
+
+	if [[ -z "$name" ]]; then
+		pkg_error "pkg_service_enable: name required"
+		return 1
+	fi
+
+	# FreeBSD guard
+	pkg_detect_os
+	if [[ "$_PKG_OS_ID" = "freebsd" ]]; then
+		pkg_warn "FreeBSD service management not supported"
+		return 1
+	fi
+
+	pkg_detect_init
+
+	# 1. systemd
+	if [[ "$_PKG_INIT_SYSTEM" = "systemd" ]]; then
+		systemctl enable "$name" 2>/dev/null
+		return $?
+	fi
+
+	# OS-family cascades for SysV
+	# 2. RHEL: chkconfig
+	if [[ "$_PKG_OS_FAMILY" = "rhel" ]]; then
+		if command -v chkconfig >/dev/null 2>&1; then
+			chkconfig --add "$name" 2>/dev/null  # safe: may already exist
+			chkconfig --level "$PKG_CHKCONFIG_LEVELS" "$name" on
+			return $?
+		fi
+	fi
+
+	# 3. Debian: update-rc.d
+	if [[ "$_PKG_OS_FAMILY" = "debian" ]]; then
+		if command -v update-rc.d >/dev/null 2>&1; then
+			update-rc.d "$name" defaults "$PKG_UPDATERCD_START" "$PKG_UPDATERCD_STOP"
+			return $?
+		fi
+	fi
+
+	# 4. Gentoo: rc-update
+	if [[ "$_PKG_OS_FAMILY" = "gentoo" ]]; then
+		if command -v rc-update >/dev/null 2>&1; then
+			rc-update add "$name" default
+			return $?
+		fi
+	fi
+
+	# 5. Slackware: manual S-links
+	if [[ "$_PKG_OS_FAMILY" = "slackware" ]]; then
+		local init_script
+		if init_script=$(_pkg_init_script_path "$name"); then
+			local rl rc_dir
+			for rl in $PKG_SLACKWARE_RUNLEVELS; do
+				rc_dir="/etc/rc.d/rc${rl}.d"
+				if [[ -d "$rc_dir" ]]; then
+					ln -sf "$init_script" "${rc_dir}/S${PKG_SLACKWARE_PRIORITY}${name}"
+				fi
+			done
+			return 0
+		fi
+		pkg_error "pkg_service_enable: no init script found for Slackware S-links"
+		return 1
+	fi
+
+	# 6. Unsupported
+	pkg_warn "pkg_service_enable: unsupported init system for enable: ${_PKG_INIT_SYSTEM}"
+	return 1
+}
+
+# pkg_service_disable name — disable service at boot (reversible)
+# Arguments:
+#   $1 — service name
+# Cascade: systemd → chkconfig off (RHEL) → update-rc.d disable (Debian) →
+#   rc-update del (Gentoo) → remove Slackware S-links → unsupported
+# Does NOT remove init scripts (use pkg_service_uninstall for that).
+# Returns 1 on failure.
+pkg_service_disable() {
+	local name="$1"
+
+	if [[ -z "$name" ]]; then
+		pkg_error "pkg_service_disable: name required"
+		return 1
+	fi
+
+	# FreeBSD guard
+	pkg_detect_os
+	if [[ "$_PKG_OS_ID" = "freebsd" ]]; then
+		pkg_warn "FreeBSD service management not supported"
+		return 1
+	fi
+
+	pkg_detect_init
+
+	# 1. systemd
+	if [[ "$_PKG_INIT_SYSTEM" = "systemd" ]]; then
+		systemctl disable "$name" 2>/dev/null
+		return $?
+	fi
+
+	# OS-family cascades for SysV
+	# 2. RHEL: chkconfig off (reversible — not --del)
+	if [[ "$_PKG_OS_FAMILY" = "rhel" ]]; then
+		if command -v chkconfig >/dev/null 2>&1; then
+			chkconfig "$name" off
+			return $?
+		fi
+	fi
+
+	# 3. Debian: update-rc.d disable
+	if [[ "$_PKG_OS_FAMILY" = "debian" ]]; then
+		if command -v update-rc.d >/dev/null 2>&1; then
+			update-rc.d "$name" disable
+			return $?
+		fi
+	fi
+
+	# 4. Gentoo: rc-update del
+	if [[ "$_PKG_OS_FAMILY" = "gentoo" ]]; then
+		if command -v rc-update >/dev/null 2>&1; then
+			rc-update del "$name" default
+			return $?
+		fi
+	fi
+
+	# 5. Slackware: remove S-links from rc.d directories
+	if [[ "$_PKG_OS_FAMILY" = "slackware" ]]; then
+		local rl rc_dir
+		for rl in $PKG_SLACKWARE_RUNLEVELS; do
+			rc_dir="/etc/rc.d/rc${rl}.d"
+			if [[ -d "$rc_dir" ]]; then
+				rm -f "${rc_dir}/"S*"${name}" 2>/dev/null  # safe: glob may match nothing
+			fi
+		done
+		return 0
+	fi
+
+	# 6. Unsupported
+	pkg_warn "pkg_service_disable: unsupported init system for disable: ${_PKG_INIT_SYSTEM}"
+	return 1
+}
+
+# pkg_service_exists name — check if unit file or init script is installed
+# Arguments:
+#   $1 — service name
+# Returns 0 if found, 1 if not.
+pkg_service_exists() {
+	local name="$1"
+
+	if [[ -z "$name" ]]; then
+		pkg_error "pkg_service_exists: name required"
+		return 1
+	fi
+
+	# FreeBSD guard
+	pkg_detect_os
+	if [[ "$_PKG_OS_ID" = "freebsd" ]]; then
+		pkg_warn "FreeBSD service management not supported"
+		return 1
+	fi
+
+	# Check systemd unit dir
+	local unit_dir
+	if unit_dir=$(_pkg_systemd_unit_dir); then
+		if [[ -f "${unit_dir}/${name}.service" ]] || [[ -f "${unit_dir}/${name}.timer" ]]; then
+			return 0
+		fi
+	fi
+
+	# Check both systemd dirs explicitly (in case auto-detect picked only one)
+	if [[ -f "/usr/lib/systemd/system/${name}.service" ]] || \
+	   [[ -f "/lib/systemd/system/${name}.service" ]]; then
+		return 0
+	fi
+
+	# Check SysV init script
+	if _pkg_init_script_path "$name" >/dev/null 2>&1; then
+		return 0
+	fi
+
+	return 1
+}
+
+# pkg_service_is_enabled name — check if service is enabled at boot
+# Arguments:
+#   $1 — service name
+# Returns 0 if enabled, 1 if not.
+pkg_service_is_enabled() {
+	local name="$1"
+
+	if [[ -z "$name" ]]; then
+		pkg_error "pkg_service_is_enabled: name required"
+		return 1
+	fi
+
+	# FreeBSD guard
+	pkg_detect_os
+	if [[ "$_PKG_OS_ID" = "freebsd" ]]; then
+		pkg_warn "FreeBSD service management not supported"
+		return 1
+	fi
+
+	pkg_detect_init
+
+	# systemd
+	if [[ "$_PKG_INIT_SYSTEM" = "systemd" ]]; then
+		if command -v systemctl >/dev/null 2>&1; then
+			systemctl is-enabled --quiet "$name" 2>/dev/null
+			return $?
+		fi
+		return 1
+	fi
+
+	# RHEL: chkconfig
+	if [[ "$_PKG_OS_FAMILY" = "rhel" ]]; then
+		if command -v chkconfig >/dev/null 2>&1; then
+			chkconfig "$name" 2>/dev/null  # returns 0 if on
+			return $?
+		fi
+	fi
+
+	# Debian: check for S-links in default runlevel dirs
+	if [[ "$_PKG_OS_FAMILY" = "debian" ]]; then
+		local rl rc_dir
+		for rl in 2 3 4 5; do
+			rc_dir="/etc/rc${rl}.d"
+			if [[ -d "$rc_dir" ]]; then
+				# shellcheck disable=SC2144 # we want any match
+				if ls "${rc_dir}/"S*"${name}" >/dev/null 2>&1; then
+					return 0
+				fi
+			fi
+		done
+		return 1
+	fi
+
+	# Gentoo: rc-update show
+	if [[ "$_PKG_OS_FAMILY" = "gentoo" ]]; then
+		if command -v rc-update >/dev/null 2>&1; then
+			rc-update show default 2>/dev/null | grep -q "$name"
+			return $?
+		fi
+	fi
+
+	# Slackware: check for S-links
+	if [[ "$_PKG_OS_FAMILY" = "slackware" ]]; then
+		local rl rc_dir
+		for rl in $PKG_SLACKWARE_RUNLEVELS; do
+			rc_dir="/etc/rc.d/rc${rl}.d"
+			if [[ -d "$rc_dir" ]]; then
+				# shellcheck disable=SC2144 # we want any match
+				if ls "${rc_dir}/"S*"${name}" >/dev/null 2>&1; then
+					return 0
+				fi
+			fi
+		done
+		return 1
+	fi
+
+	return 1
+}
+
+# --- rc.local management ---
+
+# pkg_rclocal_add entry — add line to rc.local (idempotent)
+# Arguments:
+#   $1 — line to add to rc.local
+# Creates rc.local with #!/bin/bash header and chmod 755 if missing.
+# Checks all paths in _PKG_RCLOCAL_PATHS; adds to first existing (or creates first).
+# Returns 1 on failure.
+pkg_rclocal_add() {
+	local entry="$1"
+
+	if [[ -z "$entry" ]]; then
+		pkg_error "pkg_rclocal_add: entry required"
+		return 1
+	fi
+
+	# Find first existing rc.local, or use first path in list
+	local rclocal="" path first_path=""
+	for path in $_PKG_RCLOCAL_PATHS; do
+		if [[ -z "$first_path" ]]; then
+			first_path="$path"
+		fi
+		if [[ -f "$path" ]]; then
+			rclocal="$path"
+			break
+		fi
+	done
+
+	# No existing file found — create at first path
+	if [[ -z "$rclocal" ]]; then
+		rclocal="$first_path"
+		if [[ -z "$rclocal" ]]; then
+			pkg_error "pkg_rclocal_add: no rc.local paths configured"
+			return 1
+		fi
+		# Ensure parent directory exists
+		local rclocal_dir
+		rclocal_dir=$(dirname "$rclocal")
+		if [[ ! -d "$rclocal_dir" ]]; then
+			mkdir -p "$rclocal_dir" || {
+				pkg_error "pkg_rclocal_add: failed to create directory ${rclocal_dir}"
+				return 1
+			}
+		fi
+		printf '#!/bin/bash\n' > "$rclocal" || {
+			pkg_error "pkg_rclocal_add: failed to create ${rclocal}"
+			return 1
+		}
+		chmod 755 "$rclocal"
+	fi
+
+	# Idempotency: check if entry already present
+	if grep -qF "$entry" "$rclocal" 2>/dev/null; then
+		return 0
+	fi
+
+	# Append entry
+	printf '%s\n' "$entry" >> "$rclocal" || {
+		pkg_error "pkg_rclocal_add: failed to append to ${rclocal}"
+		return 1
+	}
+
+	return 0
+}
+
+# pkg_rclocal_remove pattern — remove matching lines from rc.local
+# Arguments:
+#   $1 — grep pattern to match lines for removal
+# Uses grep -v + atomic replace (mktemp + mv) across all rc.local paths.
+# Returns 0 always (best-effort cleanup).
+pkg_rclocal_remove() {
+	local pattern="$1"
+
+	if [[ -z "$pattern" ]]; then
+		pkg_error "pkg_rclocal_remove: pattern required"
+		return 1
+	fi
+
+	local path
+	for path in $_PKG_RCLOCAL_PATHS; do
+		if [[ ! -f "$path" ]]; then
+			continue
+		fi
+
+		# Check if pattern exists before modifying
+		if ! grep -q "$pattern" "$path" 2>/dev/null; then
+			continue
+		fi
+
+		# Atomic replace: grep -v to tmpfile, then mv
+		local tmpfile
+		tmpfile=$(mktemp "${PKG_TMPDIR}/rclocal.XXXXXXXXXX") || {
+			pkg_warn "pkg_rclocal_remove: mktemp failed for ${path}"
+			continue
+		}
+		grep -v "$pattern" "$path" > "$tmpfile" 2>/dev/null || true  # safe: grep -v returns 1 when all lines match
+		mv -f "$tmpfile" "$path" || {
+			pkg_warn "pkg_rclocal_remove: failed to update ${path}"
+			rm -f "$tmpfile"
+		}
+	done
+
+	return 0
+}

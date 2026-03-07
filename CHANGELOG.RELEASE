@@ -1,6 +1,24 @@
 pkg_lib v1.0.0 | Mar 06 2026:
 
 -- New Features --
+  [New] Service lifecycle: unified service management primitives normalizing
+      systemd/SysV/Gentoo/Slackware init system handling across OS families
+  [New] Service install/uninstall: pkg_service_install (unit/init script copy
+      with auto-detection), pkg_service_uninstall (exhaustive removal from all
+      locations), pkg_service_install_timer, pkg_service_install_multi,
+      pkg_service_uninstall_multi for multi-unit service bundles
+  [New] Service control: pkg_service_start, pkg_service_stop,
+      pkg_service_restart via shared _pkg_service_ctl cascade (systemd → SysV)
+  [New] Service configuration: pkg_service_enable with OS-family cascade
+      (systemd → chkconfig → update-rc.d → rc-update → Slackware S-links),
+      pkg_service_disable (reversible), pkg_service_exists, pkg_service_is_enabled
+  [New] rc.local management: pkg_rclocal_add (idempotent, creates file if
+      missing), pkg_rclocal_remove (grep -v + atomic replace across all paths)
+  [New] Internal helpers: _pkg_systemd_unit_dir (env override + auto-detect),
+      _pkg_init_script_path (dual-dir lookup), _pkg_service_ctl (shared cascade)
+  [New] FreeBSD early-return guards on all service functions (rc.conf out of
+      scope for v1.0.0)
+  [New] Service lifecycle tests (06-service.bats, 88 tests)
   [New] Backup & restore: pkg_backup with copy/move methods, DDMMYYYY-EPOCH
       timestamps, collision-safe -N suffixes, configurable .bk.last symlink
   [New] Backup helpers: pkg_backup_exists, pkg_backup_path for symlink queries;

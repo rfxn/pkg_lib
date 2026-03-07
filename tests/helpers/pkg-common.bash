@@ -51,6 +51,15 @@ pkg_common_setup() {
 	PKG_BACKUP_SYMLINK=".bk.last"
 	PKG_BACKUP_PRUNE_DAYS="0"
 
+	# Reset service lifecycle defaults
+	PKG_CHKCONFIG_LEVELS="345"
+	PKG_UPDATERCD_START="95"
+	PKG_UPDATERCD_STOP="05"
+	PKG_SYSTEMD_UNIT_DIR=""
+	PKG_SLACKWARE_RUNLEVELS="2 3 4 5"
+	PKG_SLACKWARE_PRIORITY="95"
+	_PKG_RCLOCAL_PATHS="/etc/rc.local /etc/rc.d/rc.local"
+
 	# Disable color output for reproducible test results
 	PKG_NO_COLOR=1
 	export PKG_NO_COLOR
