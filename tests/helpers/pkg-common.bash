@@ -46,6 +46,11 @@ pkg_common_setup() {
 	_PKG_PKGMGR=""
 	_PKG_DEPS_MISSING=0
 
+	# Reset backup defaults so each test starts clean
+	PKG_BACKUP_METHOD="move"
+	PKG_BACKUP_SYMLINK=".bk.last"
+	PKG_BACKUP_PRUNE_DAYS="0"
+
 	# Disable color output for reproducible test results
 	PKG_NO_COLOR=1
 	export PKG_NO_COLOR

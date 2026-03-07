@@ -514,3 +514,536 @@ pkg_check_deps() {
 
 	return "$any_missing"
 }
+
+# ══════════════════════════════════════════════════════════════════
+# Section: Backup & Restore
+# ══════════════════════════════════════════════════════════════════
+
+# Configurable defaults — consuming projects override via environment
+PKG_BACKUP_METHOD="${PKG_BACKUP_METHOD:-move}"
+PKG_BACKUP_SYMLINK="${PKG_BACKUP_SYMLINK:-.bk.last}"
+PKG_BACKUP_PRUNE_DAYS="${PKG_BACKUP_PRUNE_DAYS:-0}"
+
+# pkg_backup install_path [method] — create timestamped backup of install_path
+# Arguments:
+#   $1 — install path to back up (must exist)
+#   $2 — method: "copy" (cp -R, original stays) or "move" (mv, original removed)
+#         Defaults to PKG_BACKUP_METHOD env var (default: move)
+# Backup naming: <install_path>.<DDMMYYYY-EPOCH>
+# Collision safety: appends -N suffix if target already exists.
+# Creates PKG_BACKUP_SYMLINK (default .bk.last) pointing to latest backup.
+# Returns 1 on failure.
+pkg_backup() {
+	local install_path="$1"
+	local method="${2:-${PKG_BACKUP_METHOD}}"
+
+	if [[ -z "$install_path" ]]; then
+		pkg_error "pkg_backup: install_path required"
+		return 1
+	fi
+
+	if [[ ! -e "$install_path" ]]; then
+		pkg_error "pkg_backup: install path does not exist: ${install_path}"
+		return 1
+	fi
+
+	# Validate method
+	case "$method" in
+		copy|move) ;;
+		*)
+			pkg_error "pkg_backup: invalid method '${method}' (must be copy or move)"
+			return 1
+			;;
+	esac
+
+	# Build timestamp: DDMMYYYY-EPOCH
+	local timestamp
+	timestamp="$(date +%d%m%Y)-$(date +%s)"
+
+	local backup_path="${install_path}.${timestamp}"
+
+	# Collision safety — append -N if target exists
+	if [[ -e "$backup_path" ]]; then
+		local suffix=1
+		while [[ -e "${backup_path}-${suffix}" ]]; do
+			suffix=$((suffix + 1))
+		done
+		backup_path="${backup_path}-${suffix}"
+	fi
+
+	# Perform backup
+	local rc=0
+	case "$method" in
+		copy)
+			/usr/bin/cp -pR "$install_path" "$backup_path" || rc=$?
+			;;
+		move)
+			mv "$install_path" "$backup_path" || rc=$?
+			;;
+	esac
+
+	if [[ "$rc" -ne 0 ]]; then
+		pkg_error "pkg_backup: failed to ${method} ${install_path} to ${backup_path}"
+		return 1
+	fi
+
+	# Update .bk.last symlink (or configured name)
+	local symlink_path
+	symlink_path="$(dirname "$install_path")/${PKG_BACKUP_SYMLINK}"
+	rm -f "$symlink_path"
+	ln -s "$backup_path" "$symlink_path" || {
+		pkg_warn "pkg_backup: failed to create symlink ${symlink_path}"
+	}
+
+	pkg_info "backup created: ${backup_path}"
+	return 0
+}
+
+# pkg_backup_exists install_path — return 0 if .bk.last symlink exists
+# Arguments:
+#   $1 — install path (symlink is looked up in its parent directory)
+pkg_backup_exists() {
+	local install_path="$1"
+
+	if [[ -z "$install_path" ]]; then
+		pkg_error "pkg_backup_exists: install_path required"
+		return 1
+	fi
+
+	local symlink_path
+	symlink_path="$(dirname "$install_path")/${PKG_BACKUP_SYMLINK}"
+	[[ -L "$symlink_path" ]]
+}
+
+# pkg_backup_path install_path — echo resolved path of .bk.last symlink
+# Arguments:
+#   $1 — install path (symlink is looked up in its parent directory)
+# Returns 1 if symlink does not exist.
+pkg_backup_path() {
+	local install_path="$1"
+
+	if [[ -z "$install_path" ]]; then
+		pkg_error "pkg_backup_path: install_path required"
+		return 1
+	fi
+
+	local symlink_path
+	symlink_path="$(dirname "$install_path")/${PKG_BACKUP_SYMLINK}"
+
+	if [[ ! -L "$symlink_path" ]]; then
+		pkg_error "pkg_backup_path: no backup symlink found: ${symlink_path}"
+		return 1
+	fi
+
+	# Resolve symlink target
+	local target
+	target=$(readlink "$symlink_path") || {
+		pkg_error "pkg_backup_path: failed to read symlink: ${symlink_path}"
+		return 1
+	}
+	echo "$target"
+	return 0
+}
+
+# pkg_backup_prune install_path max_age_days — remove backups older than N days
+# Arguments:
+#   $1 — install path (backups are <install_path>.<timestamp> in parent dir)
+#   $2 — max age in days (0 = no pruning)
+# Removes matching backup directories/files older than max_age_days.
+# Does not remove the .bk.last symlink target.
+# Returns 0 on success, 1 on invalid arguments.
+pkg_backup_prune() {
+	local install_path="$1"
+	local max_age_days="$2"
+
+	if [[ -z "$install_path" ]] || [[ -z "$max_age_days" ]]; then
+		pkg_error "pkg_backup_prune: install_path and max_age_days required"
+		return 1
+	fi
+
+	# Validate max_age_days is a non-negative integer
+	local int_pat='^[0-9]+$'
+	if ! [[ "$max_age_days" =~ $int_pat ]]; then
+		pkg_error "pkg_backup_prune: max_age_days must be a positive integer"
+		return 1
+	fi
+
+	# 0 = no pruning
+	if [[ "$max_age_days" -eq 0 ]]; then
+		return 0
+	fi
+
+	local parent_dir
+	parent_dir="$(dirname "$install_path")"
+	local base_name
+	base_name="$(basename "$install_path")"
+
+	# Resolve current .bk.last target so we never prune it
+	local current_backup=""
+	local symlink_path="${parent_dir}/${PKG_BACKUP_SYMLINK}"
+	if [[ -L "$symlink_path" ]]; then
+		current_backup=$(readlink "$symlink_path" 2>/dev/null) || current_backup=""
+	fi
+
+	# Find backup entries matching the pattern: <base_name>.<digits>-<digits>*
+	local bk_pat="^${base_name}\.[0-9]{8}-[0-9]+"
+	local pruned=0
+	local entry entry_path
+	while IFS= read -r entry; do
+		[[ -z "$entry" ]] && continue
+		if ! [[ "$entry" =~ $bk_pat ]]; then
+			continue
+		fi
+		entry_path="${parent_dir}/${entry}"
+
+		# Skip if this is the current backup target
+		if [[ -n "$current_backup" ]] && [[ "$entry_path" = "$current_backup" ]]; then
+			continue
+		fi
+
+		# Check age using find -maxdepth 0 -mtime
+		if find "$entry_path" -maxdepth 0 -mtime +"$max_age_days" -print 2>/dev/null | read -r _; then
+			rm -rf "$entry_path"
+			pruned=$((pruned + 1))
+		fi
+	done < <(ls -1 "$parent_dir" 2>/dev/null)
+
+	if [[ "$pruned" -gt 0 ]]; then
+		pkg_info "pruned ${pruned} old backup(s)"
+	fi
+
+	return 0
+}
+
+# pkg_restore_files backup_path install_path patterns... — selective file restore
+# Arguments:
+#   $1 — backup path (source directory)
+#   $2 — install path (destination directory)
+#   $3+ — glob patterns to restore (e.g., "conf.*" "*.rules")
+# Copies matching files from backup to install path, preserving attributes.
+# Returns 1 on failure.
+pkg_restore_files() {
+	local backup_path="$1"
+	local install_path="$2"
+	shift 2
+
+	if [[ -z "$backup_path" ]] || [[ -z "$install_path" ]]; then
+		pkg_error "pkg_restore_files: backup_path and install_path required"
+		return 1
+	fi
+
+	if [[ $# -eq 0 ]]; then
+		pkg_error "pkg_restore_files: at least one glob pattern required"
+		return 1
+	fi
+
+	if [[ ! -d "$backup_path" ]]; then
+		pkg_error "pkg_restore_files: backup path not found: ${backup_path}"
+		return 1
+	fi
+
+	# Create install path if it does not exist
+	if [[ ! -d "$install_path" ]]; then
+		mkdir -p "$install_path" || {
+			pkg_error "pkg_restore_files: failed to create ${install_path}"
+			return 1
+		}
+	fi
+
+	local pattern restored=0 rc
+	for pattern in "$@"; do
+		# Use find with -name for each pattern (avoids glob expansion issues)
+		while IFS= read -r match; do
+			[[ -z "$match" ]] && continue
+			# Compute relative path from backup_path
+			local relpath="${match#"${backup_path}"/}"
+			local dest="${install_path}/${relpath}"
+			local dest_dir
+			dest_dir="$(dirname "$dest")"
+
+			# Ensure destination directory exists
+			if [[ ! -d "$dest_dir" ]]; then
+				mkdir -p "$dest_dir" || continue
+			fi
+
+			rc=0
+			/usr/bin/cp -p "$match" "$dest" || rc=$?
+			if [[ "$rc" -eq 0 ]]; then
+				restored=$((restored + 1))
+			else
+				pkg_warn "pkg_restore_files: failed to restore ${relpath}"
+			fi
+		done < <(find "$backup_path" -name "$pattern" -not -type d 2>/dev/null)
+	done
+
+	if [[ "$restored" -eq 0 ]]; then
+		pkg_warn "pkg_restore_files: no files matched the given patterns"
+		return 1
+	fi
+
+	pkg_info "restored ${restored} file(s)"
+	return 0
+}
+
+# pkg_restore_dir backup_path install_path subdir — restore entire subdirectory
+# Arguments:
+#   $1 — backup path (source root)
+#   $2 — install path (destination root)
+#   $3 — subdirectory name to restore (relative to backup/install)
+# Copies the entire subdirectory from backup to install path.
+# Returns 1 on failure.
+pkg_restore_dir() {
+	local backup_path="$1"
+	local install_path="$2"
+	local subdir="$3"
+
+	if [[ -z "$backup_path" ]] || [[ -z "$install_path" ]] || [[ -z "$subdir" ]]; then
+		pkg_error "pkg_restore_dir: backup_path, install_path, and subdir required"
+		return 1
+	fi
+
+	local src="${backup_path}/${subdir}"
+
+	if [[ ! -d "$src" ]]; then
+		pkg_error "pkg_restore_dir: subdirectory not found in backup: ${subdir}"
+		return 1
+	fi
+
+	local dest="${install_path}/${subdir}"
+	local dest_parent
+	dest_parent="$(dirname "$dest")"
+
+	# Ensure destination parent directory exists
+	if [[ ! -d "$dest_parent" ]]; then
+		mkdir -p "$dest_parent" || {
+			pkg_error "pkg_restore_dir: failed to create ${dest_parent}"
+			return 1
+		}
+	fi
+
+	/usr/bin/cp -pR "$src" "$dest" || {
+		pkg_error "pkg_restore_dir: failed to restore ${subdir}"
+		return 1
+	}
+
+	pkg_info "restored directory: ${subdir}"
+	return 0
+}
+
+# ══════════════════════════════════════════════════════════════════
+# Section: File Operations
+# ══════════════════════════════════════════════════════════════════
+
+# pkg_copy_tree src_dir dest_dir — recursive copy with attribute preservation
+# Arguments:
+#   $1 — source directory
+#   $2 — destination directory
+# Uses cp -pR to preserve ownership, permissions, timestamps.
+# Returns 1 on failure.
+pkg_copy_tree() {
+	local src_dir="$1"
+	local dest_dir="$2"
+
+	if [[ -z "$src_dir" ]] || [[ -z "$dest_dir" ]]; then
+		pkg_error "pkg_copy_tree: src_dir and dest_dir required"
+		return 1
+	fi
+
+	if [[ ! -d "$src_dir" ]]; then
+		pkg_error "pkg_copy_tree: source directory not found: ${src_dir}"
+		return 1
+	fi
+
+	# Create destination if it does not exist
+	if [[ ! -d "$dest_dir" ]]; then
+		mkdir -p "$dest_dir" || {
+			pkg_error "pkg_copy_tree: failed to create ${dest_dir}"
+			return 1
+		}
+	fi
+
+	/usr/bin/cp -pR "${src_dir}/." "$dest_dir/" || {
+		pkg_error "pkg_copy_tree: failed to copy ${src_dir} to ${dest_dir}"
+		return 1
+	}
+
+	return 0
+}
+
+# pkg_set_perms path dir_mode file_mode [exec_files...] — set permissions
+# Arguments:
+#   $1 — base path to set permissions on
+#   $2 — mode for directories (e.g., "750")
+#   $3 — mode for regular files (e.g., "640")
+#   $4+ — executable files (relative to path) to set to exec_mode (same as dir_mode)
+# Sets directory permissions, then file permissions, then executable overrides.
+# Returns 1 on failure.
+pkg_set_perms() {
+	local base_path="$1"
+	local dir_mode="$2"
+	local file_mode="$3"
+	shift 3
+
+	if [[ -z "$base_path" ]] || [[ -z "$dir_mode" ]] || [[ -z "$file_mode" ]]; then
+		pkg_error "pkg_set_perms: base_path, dir_mode, and file_mode required"
+		return 1
+	fi
+
+	if [[ ! -e "$base_path" ]]; then
+		pkg_error "pkg_set_perms: path does not exist: ${base_path}"
+		return 1
+	fi
+
+	# Set directory permissions
+	find "$base_path" -type d -exec chmod "$dir_mode" {} + 2>/dev/null
+
+	# Set regular file permissions
+	find "$base_path" -type f -exec chmod "$file_mode" {} + 2>/dev/null
+
+	# Override executable files (use dir_mode as executable mode)
+	local exec_file
+	for exec_file in "$@"; do
+		local full_path="${base_path}/${exec_file}"
+		if [[ -f "$full_path" ]]; then
+			chmod "$dir_mode" "$full_path" || {
+				pkg_warn "pkg_set_perms: failed to set exec mode on ${exec_file}"
+			}
+		fi
+	done
+
+	return 0
+}
+
+# pkg_create_dirs mode dirs... — create directories with specified mode
+# Arguments:
+#   $1 — mode (e.g., "750")
+#   $2+ — directory paths to create
+# Returns 1 if any creation fails.
+pkg_create_dirs() {
+	local mode="$1"
+	shift
+
+	if [[ -z "$mode" ]] || [[ $# -eq 0 ]]; then
+		pkg_error "pkg_create_dirs: mode and at least one directory required"
+		return 1
+	fi
+
+	local dir rc=0
+	for dir in "$@"; do
+		if [[ ! -d "$dir" ]]; then
+			mkdir -p "$dir" || {
+				pkg_error "pkg_create_dirs: failed to create ${dir}"
+				rc=1
+				continue
+			}
+		fi
+		chmod "$mode" "$dir" || {
+			pkg_warn "pkg_create_dirs: failed to set mode ${mode} on ${dir}"
+		}
+	done
+
+	return "$rc"
+}
+
+# pkg_symlink target link_path — create or update a symbolic link
+# Arguments:
+#   $1 — target (what the link points to)
+#   $2 — link path (the symlink to create)
+# Removes existing link/file at link_path before creating.
+# Returns 1 on failure.
+pkg_symlink() {
+	local target="$1"
+	local link_path="$2"
+
+	if [[ -z "$target" ]] || [[ -z "$link_path" ]]; then
+		pkg_error "pkg_symlink: target and link_path required"
+		return 1
+	fi
+
+	# Remove existing link or file at link_path
+	rm -f "$link_path" 2>/dev/null  # safe: only removes file/symlink, not dir
+
+	ln -s "$target" "$link_path" || {
+		pkg_error "pkg_symlink: failed to create symlink ${link_path} -> ${target}"
+		return 1
+	}
+
+	return 0
+}
+
+# pkg_symlink_cleanup link_paths... — remove symlinks only (safety: skip non-symlinks)
+# Arguments:
+#   $1+ — symlink paths to remove
+# Silently skips paths that are not symlinks (safety measure).
+# Returns 0 always.
+pkg_symlink_cleanup() {
+	if [[ $# -eq 0 ]]; then
+		pkg_error "pkg_symlink_cleanup: at least one link path required"
+		return 1
+	fi
+
+	local link_path
+	for link_path in "$@"; do
+		if [[ -L "$link_path" ]]; then
+			rm -f "$link_path"
+		elif [[ -e "$link_path" ]]; then
+			pkg_warn "pkg_symlink_cleanup: skipping non-symlink: ${link_path}"
+		fi
+	done
+
+	return 0
+}
+
+# pkg_sed_replace old_path new_path files... — sed -i path replacement across files
+# Arguments:
+#   $1 — old path string to replace
+#   $2 — new path string to substitute
+#   $3+ — files to perform replacement on
+# Uses '|' as sed delimiter to avoid conflicts with path separators.
+# Returns 1 if no files provided.
+pkg_sed_replace() {
+	local old_path="$1"
+	local new_path="$2"
+	shift 2
+
+	if [[ -z "$old_path" ]] || [[ -z "$new_path" ]]; then
+		pkg_error "pkg_sed_replace: old_path and new_path required"
+		return 1
+	fi
+
+	if [[ $# -eq 0 ]]; then
+		pkg_error "pkg_sed_replace: at least one file required"
+		return 1
+	fi
+
+	local file
+	for file in "$@"; do
+		if [[ ! -f "$file" ]]; then
+			pkg_warn "pkg_sed_replace: file not found, skipping: ${file}"
+			continue
+		fi
+		sed -i "s|${old_path}|${new_path}|g" "$file" || {
+			pkg_warn "pkg_sed_replace: sed failed on ${file}"
+		}
+	done
+
+	return 0
+}
+
+# pkg_tmpfile [template] — mktemp wrapper with default template
+# Arguments:
+#   $1 — optional mktemp template (default: pkg_lib.XXXXXXXXXX)
+# Creates temp file in PKG_TMPDIR. Echoes path to stdout.
+# Returns 1 on failure.
+pkg_tmpfile() {
+	local template="${1:-pkg_lib.XXXXXXXXXX}"
+
+	local tmpfile
+	tmpfile=$(mktemp "${PKG_TMPDIR}/${template}") || {
+		pkg_error "pkg_tmpfile: mktemp failed"
+		return 1
+	}
+
+	echo "$tmpfile"
+	return 0
+}

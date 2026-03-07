@@ -2,6 +2,20 @@ pkg_lib CHANGELOG
 ==================
 
 - v1.0.0 | Mar 06 2026:
+  [New] Backup & restore: pkg_backup with copy/move methods, DDMMYYYY-EPOCH
+      timestamps, collision-safe -N suffixes, configurable .bk.last symlink
+  [New] Backup helpers: pkg_backup_exists, pkg_backup_path for symlink queries;
+      pkg_backup_prune for age-based cleanup with .bk.last protection
+  [New] Restore primitives: pkg_restore_files for selective glob-based restore;
+      pkg_restore_dir for full subdirectory restore
+  [New] File operations: pkg_copy_tree (recursive copy with attribute preservation),
+      pkg_set_perms (dirs/files/executables), pkg_create_dirs (mkdir -p + chmod)
+  [New] Symlink management: pkg_symlink (create/update), pkg_symlink_cleanup
+      (safe removal, skips non-symlinks)
+  [New] Path operations: pkg_sed_replace (sed -i with | delimiter across files),
+      pkg_tmpfile (mktemp wrapper with PKG_TMPDIR support)
+  [New] Backup/restore tests (04-backup.bats, 34 tests)
+  [New] File operations tests (05-fileops.bats, 38 tests)
   [New] Output functions: pkg_header, pkg_info, pkg_warn, pkg_error, pkg_success,
       pkg_section, pkg_item with terminal color detection (_pkg_color_init)
   [New] OS/platform detection: pkg_detect_os with /etc/os-release and legacy
