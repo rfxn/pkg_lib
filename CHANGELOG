@@ -1,6 +1,16 @@
 pkg_lib CHANGELOG
 ==================
 
+- v1.0.1 | Mar 07 2026:
+  [Fix] pkg_sed_replace: escape | delimiter in old_path and new_path arguments
+      before sed substitution, matching the escaping pattern from pkg_config_set
+  [Change] pkg_backup_prune: replace ls -1 directory enumeration with find
+      -maxdepth 1 -mindepth 1 -printf for robustness consistency
+  [Change] pkg_set_perms: add inline comments on find 2>/dev/null suppressions
+      per coding standards (best-effort traversal errors safe to ignore)
+  [Change] pkg_service_enable, pkg_service_disable: add inline comments on
+      systemctl 2>/dev/null suppressions (may fail if unit missing)
+
 - v1.0.0 | Mar 06 2026:
   [New] pkg_lib.sh — shared packaging, install, and uninstall library for rfxn
       projects (3200+ lines, 80+ functions); zero project-specific code, all

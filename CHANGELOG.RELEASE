@@ -1,53 +1,10 @@
-pkg_lib v1.0.0 | Mar 06 2026:
+pkg_lib v1.0.1 | Mar 07 2026:
 
--- Runtime Library (pkg_lib.sh) --
-  [New] Shared packaging, install, and uninstall library (3200+ lines, 80+
-      functions); zero project-specific code, all behavior via PKG_* env vars
-  [New] Output functions: pkg_header, pkg_info, pkg_warn, pkg_error, pkg_success,
-      pkg_section, pkg_item with terminal color detection
-  [New] OS/platform detection: pkg_detect_os (os-release + legacy fallbacks),
-      pkg_detect_init (systemd/SysV/upstart/rc.local), pkg_detect_pkgmgr
-      (dnf/yum/apt/emerge/pkg/slackpkg); all cached after first call
-  [New] Dependency checking: pkg_check_dep (required/recommended/optional),
-      pkg_check_deps (batch parallel-array), pkg_dep_hint (install hints)
-  [New] Backup & restore: pkg_backup (copy/move, timestamps, collision safety),
-      pkg_backup_exists/path, pkg_backup_prune, pkg_restore_files/dir
-  [New] File operations: pkg_copy_tree, pkg_set_perms, pkg_create_dirs,
-      pkg_symlink, pkg_symlink_cleanup, pkg_sed_replace, pkg_tmpfile
-  [New] Service lifecycle: pkg_service_install/uninstall/start/stop/restart,
-      pkg_service_enable/disable/exists/is_enabled with OS-family cascade
-      (systemd/chkconfig/update-rc.d/rc-update/Slackware); timer and
-      multi-unit support; pkg_rclocal_add/remove; FreeBSD guards
-  [New] Cron management: pkg_cron_install/remove/cleanup_legacy,
-      pkg_cron_preserve_schedule/restore_schedule with eval validation
-  [New] Documentation install: pkg_man_install, pkg_bash_completion,
-      pkg_logrotate_install, pkg_doc_install
-  [New] Config migration: pkg_config_merge (AWK two-pass), pkg_config_migrate_var,
-      pkg_config_clamp, pkg_config_get, pkg_config_set (pipe-char safe)
-  [New] FHS layout: pkg_fhs_register, pkg_fhs_install, pkg_fhs_symlink_farm,
-      pkg_fhs_symlink_farm_cleanup; RPM/DEB artifact generators
-  [New] Uninstall primitives: pkg_uninstall_confirm/files/man/cron/logrotate/
-      completion/sysconfig
-  [New] Manifest support: pkg_manifest_load, pkg_manifest_validate
-
--- Build-Time Generator (pkg_gen.sh) --
-  [New] Manifest-driven packaging artifact generator with @@PLACEHOLDER@@
-      substitution, conditional blocks (@@IF_*@@/@@ENDIF_*@@), two-level
-      token model, and pipe-char safe sed escaping
-  [New] Packaging templates: RPM spec, DEB debian/ (10 files), Docker build/test
-      Dockerfiles (el7/el9/deb), Makefile, GHA release workflow, install
-      verification script
-
--- Documentation --
-  [New] README.md: library overview, quick-start examples, full function
-      reference, pkg_gen.sh usage, manifest format, template inventory
-
--- Testing --
-  [New] 454 tests across 14 files; 9-OS Docker matrix; CI with lint + batsman
-
--- Fixes --
-  [Fix] Test assertions: bare `! grep -q` replaced with `run grep -q` + status
-      check for proper BATS error handling (QA-001)
-  [Fix] pkg_gen.sh: pipe character escape in sed substitution values (QA-004)
-  [Fix] pkg_gen.sh: removed dead _gen_warn() function (QA-002)
-  [Fix] pkg_gen.sh: corrected misleading awk comment (QA-003)
+  [Fix] pkg_sed_replace: escape | delimiter in old_path and new_path arguments
+      before sed substitution, matching the escaping pattern from pkg_config_set
+  [Change] pkg_backup_prune: replace ls -1 directory enumeration with find
+      -maxdepth 1 -mindepth 1 -printf for robustness consistency
+  [Change] pkg_set_perms: add inline comments on find 2>/dev/null suppressions
+      per coding standards (best-effort traversal errors safe to ignore)
+  [Change] pkg_service_enable, pkg_service_disable: add inline comments on
+      systemctl 2>/dev/null suppressions (may fail if unit missing)
