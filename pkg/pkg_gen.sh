@@ -49,10 +49,6 @@ _gen_info() {
 	echo "  [info] $1"
 }
 
-_gen_warn() {
-	echo "  [warn] $1" >&2
-}
-
 _gen_error() {
 	echo "  [error] $1" >&2
 }
@@ -206,7 +202,7 @@ _gen_build_sed_script() {
 		if [[ -n "$val" ]]; then
 			# Escape sed special characters in the value
 			local escaped_val
-			escaped_val=$(printf '%s' "$val" | sed -e 's/[&/\]/\\&/g')
+			escaped_val=$(printf '%s' "$val" | sed -e 's/[&/\\|]/\\&/g')
 			sed_script="${sed_script}s|@@${var}@@|${escaped_val}|g;"
 		fi
 	done
@@ -267,7 +263,8 @@ _gen_process_conditionals() {
 		fi
 	done
 
-	# Clean up empty lines left by marker removal (collapse triple+ blank lines to double)
+	# Clean up empty lines left by marker removal (preserve blank lines between
+	# non-empty content but strip trailing blanks at end of file)
 	local tmpclean
 	tmpclean=$(mktemp -t pkg_gen_clean.XXXXXX)
 	awk 'NR==1{print; next} /^$/{empty++; next} {while(empty>0){print ""; empty--}; print}' \

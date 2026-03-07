@@ -895,7 +895,8 @@ INITEOF
 
 	run pkg_rclocal_remove "myservice"
 	[[ "$status" -eq 0 ]]
-	! grep -q "myservice" "${MOCK_RCLOCAL_DIR}/rc.local"
+	run grep -q "myservice" "${MOCK_RCLOCAL_DIR}/rc.local"
+	[[ "$status" -ne 0 ]]
 	grep -q "other_entry" "${MOCK_RCLOCAL_DIR}/rc.local"
 }
 
@@ -908,8 +909,10 @@ INITEOF
 
 	run pkg_rclocal_remove "myservice"
 	[[ "$status" -eq 0 ]]
-	! grep -q "myservice" "${MOCK_RCLOCAL_DIR}/rc.local"
-	! grep -q "myservice" "${MOCK_RCLOCAL_DIR}/rc.d/rc.local"
+	run grep -q "myservice" "${MOCK_RCLOCAL_DIR}/rc.local"
+	[[ "$status" -ne 0 ]]
+	run grep -q "myservice" "${MOCK_RCLOCAL_DIR}/rc.d/rc.local"
+	[[ "$status" -ne 0 ]]
 }
 
 @test "pkg_rclocal_remove: preserves other content" {
@@ -920,7 +923,8 @@ INITEOF
 	run pkg_rclocal_remove "remove_this"
 	[[ "$status" -eq 0 ]]
 	grep -q "keep_this" "${MOCK_RCLOCAL_DIR}/rc.local"
-	! grep -q "remove_this" "${MOCK_RCLOCAL_DIR}/rc.local"
+	run grep -q "remove_this" "${MOCK_RCLOCAL_DIR}/rc.local"
+	[[ "$status" -ne 0 ]]
 }
 
 @test "pkg_rclocal_remove: no-op when file does not exist" {

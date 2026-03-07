@@ -236,6 +236,35 @@ MANIFEST
 	[[ "$output" == *"PKG_NAME"* ]]
 }
 
+# ── Sed escape edge cases ─────────────────────────────────────
+
+@test "pkg_gen.sh: manifest value containing pipe char substituted correctly" {
+	# QA-004: pipe char | is the sed delimiter — must be escaped in values
+	local pipe_manifest="${TEST_TMPDIR}/pipe.manifest"
+	cat > "$pipe_manifest" <<'MANIFEST'
+PKG_NAME="pipepkg"
+PKG_VERSION="1.0.0"
+PKG_SUMMARY="Summary with | pipe char"
+PKG_INSTALL_PATH="/opt/pipepkg"
+MANIFEST
+
+	local tpl_dir="${TEST_TMPDIR}/templates"
+	mkdir -p "$tpl_dir"
+	cat > "$tpl_dir/test.conf.in" <<'TEMPLATE'
+name=@@PKG_NAME@@
+summary=@@PKG_SUMMARY@@
+TEMPLATE
+
+	local out_dir="${TEST_TMPDIR}/pipe-output"
+	run "$GEN_SCRIPT" --manifest "$pipe_manifest" --templates "$tpl_dir" --output "$out_dir"
+	[[ "$status" -eq 0 ]]
+
+	local outfile="$out_dir/test.conf"
+	[[ -f "$outfile" ]]
+	grep -q 'name=pipepkg' "$outfile"
+	grep -q 'Summary with | pipe char' "$outfile"
+}
+
 # ── Conditional blocks ────────────────────────────────────────
 
 @test "pkg_gen.sh: conditional blocks removed when feature flag is 0" {
@@ -268,9 +297,12 @@ MANIFEST
 	local outfile="$out_dir/test.conf"
 	[[ -f "$outfile" ]]
 	# The conditional block should be removed
-	! grep -q 'cron_schedule' "$outfile"
-	! grep -q '@@IF_CRON_D@@' "$outfile"
-	! grep -q '@@ENDIF_CRON_D@@' "$outfile"
+	run grep -q 'cron_schedule' "$outfile"
+	[[ "$status" -ne 0 ]]
+	run grep -q '@@IF_CRON_D@@' "$outfile"
+	[[ "$status" -ne 0 ]]
+	run grep -q '@@ENDIF_CRON_D@@' "$outfile"
+	[[ "$status" -ne 0 ]]
 	# Non-conditional content should remain
 	grep -q 'option_a=1' "$outfile"
 	grep -q 'option_b=2' "$outfile"
@@ -307,8 +339,10 @@ MANIFEST
 	[[ -f "$outfile" ]]
 	# The content should be kept, markers removed
 	grep -q 'logrotate_enabled=true' "$outfile"
-	! grep -q '@@IF_LOGROTATE@@' "$outfile"
-	! grep -q '@@ENDIF_LOGROTATE@@' "$outfile"
+	run grep -q '@@IF_LOGROTATE@@' "$outfile"
+	[[ "$status" -ne 0 ]]
+	run grep -q '@@ENDIF_LOGROTATE@@' "$outfile"
+	[[ "$status" -ne 0 ]]
 	grep -q 'option_a=1' "$outfile"
 	grep -q 'option_b=2' "$outfile"
 }
@@ -347,7 +381,8 @@ MANIFEST
 	# Systemd block kept (flag=1)
 	grep -q 'systemd_enabled=true' "$outfile"
 	# Cron block removed (flag=0)
-	! grep -q 'cron_enabled=true' "$outfile"
+	run grep -q 'cron_enabled=true' "$outfile"
+	[[ "$status" -ne 0 ]]
 	# Surrounding content intact
 	grep -q 'base=true' "$outfile"
 	grep -q 'middle=true' "$outfile"
