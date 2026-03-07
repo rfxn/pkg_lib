@@ -27,6 +27,54 @@ pkg_common_setup() {
 
 	# Reset source guard to allow re-sourcing for clean state
 	_PKG_LIB_LOADED=""
+
+	# Reset all detection caches so each test starts fresh
+	_PKG_COLOR_INIT_DONE=""
+	_PKG_C_RED=""
+	_PKG_C_GREEN=""
+	_PKG_C_YELLOW=""
+	_PKG_C_BOLD=""
+	_PKG_C_RESET=""
+	_PKG_OS_DETECT_DONE=""
+	_PKG_OS_FAMILY=""
+	_PKG_OS_ID=""
+	_PKG_OS_VERSION=""
+	_PKG_OS_NAME=""
+	_PKG_INIT_DETECT_DONE=""
+	_PKG_INIT_SYSTEM=""
+	_PKG_PKGMGR_DETECT_DONE=""
+	_PKG_PKGMGR=""
+	_PKG_DEPS_MISSING=0
+
+	# Reset backup defaults so each test starts clean
+	PKG_BACKUP_METHOD="move"
+	PKG_BACKUP_SYMLINK=".bk.last"
+	PKG_BACKUP_PRUNE_DAYS="0"
+
+	# Reset service lifecycle defaults
+	PKG_CHKCONFIG_LEVELS="345"
+	PKG_UPDATERCD_START="95"
+	PKG_UPDATERCD_STOP="05"
+	PKG_SYSTEMD_UNIT_DIR=""
+	PKG_SLACKWARE_RUNLEVELS="2 3 4 5"
+	PKG_SLACKWARE_PRIORITY="95"
+	_PKG_RCLOCAL_PATHS="/etc/rc.local /etc/rc.d/rc.local"
+
+	# Reset FHS registry arrays for test isolation
+	_PKG_FHS_SRCS=()
+	_PKG_FHS_DESTS=()
+	_PKG_FHS_MODES=()
+	_PKG_FHS_TYPES=()
+
+	# Reset cron management defaults (no persistent state — functions are stateless)
+
+	# Reset config migration defaults (no persistent state — functions are stateless)
+
+	# Disable color output for reproducible test results
+	PKG_NO_COLOR=1
+	export PKG_NO_COLOR
+
+	# Re-source library with clean state
 	# shellcheck disable=SC1091
 	source "${PROJECT_ROOT}/files/pkg_lib.sh"
 

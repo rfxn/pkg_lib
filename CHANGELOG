@@ -2,8 +2,90 @@ pkg_lib CHANGELOG
 ==================
 
 - v1.0.0 | Mar 06 2026:
-  [New] Repository skeleton with batsman test infrastructure (v1.0.3)
-  [New] Minimal pkg_lib.sh stub with source guard and version variable
-  [New] 9-OS Docker test matrix (debian12, centos6-rocky10, ubuntu 12.04-24.04)
-  [New] CI workflow with lint + batsman reusable test workflow
-  [New] Scaffold validation tests (00-scaffold.bats, 2 tests)
+  [New] pkg_lib.sh — shared packaging, install, and uninstall library for rfxn
+      projects (3200+ lines, 80+ functions); zero project-specific code, all
+      behavior controlled via PKG_* environment variables, bash 4.1+ compatible
+  [New] Output functions: pkg_header, pkg_info, pkg_warn, pkg_error, pkg_success,
+      pkg_section, pkg_item with terminal color detection (_pkg_color_init)
+  [New] OS/platform detection: pkg_detect_os with /etc/os-release and legacy
+      fallback chain (redhat-release, debian_version, gentoo, slackware, uname);
+      pkg_detect_init (systemd/SysV/upstart/rc.local cascade);
+      pkg_detect_pkgmgr (dnf/yum/apt/emerge/pkg/slackpkg via command -v);
+      pkg_is_systemd, pkg_os_family accessors; all cached after first call
+  [New] Dependency checking: pkg_check_dep with required/recommended/optional
+      levels; pkg_check_deps for batch parallel-array checking; pkg_dep_hint
+      for package-manager-specific install hints
+  [New] Backup & restore: pkg_backup with copy/move methods, DDMMYYYY-EPOCH
+      timestamps, collision-safe -N suffixes, configurable .bk.last symlink;
+      pkg_backup_exists, pkg_backup_path for symlink queries;
+      pkg_backup_prune for age-based cleanup with .bk.last protection;
+      pkg_restore_files for selective glob-based restore;
+      pkg_restore_dir for full subdirectory restore
+  [New] File operations: pkg_copy_tree (recursive copy with attribute preservation),
+      pkg_set_perms (dirs/files/executables), pkg_create_dirs (mkdir -p + chmod);
+      pkg_symlink (create/update), pkg_symlink_cleanup (safe removal);
+      pkg_sed_replace (sed -i with | delimiter across files),
+      pkg_tmpfile (mktemp wrapper with PKG_TMPDIR support)
+  [New] Service lifecycle: unified service management primitives normalizing
+      systemd/SysV/Gentoo/Slackware init system handling across OS families;
+      pkg_service_install/uninstall (unit/init script with auto-detection);
+      pkg_service_install_timer, pkg_service_install_multi,
+      pkg_service_uninstall_multi for multi-unit service bundles;
+      pkg_service_start/stop/restart via shared _pkg_service_ctl cascade;
+      pkg_service_enable with OS-family cascade (systemd/chkconfig/update-rc.d/
+      rc-update/Slackware S-links), pkg_service_disable, pkg_service_exists,
+      pkg_service_is_enabled; pkg_rclocal_add (idempotent), pkg_rclocal_remove;
+      FreeBSD early-return guards on all service functions
+  [New] Cron management: pkg_cron_install (auto-detect mode 644/755 from
+      destination path), pkg_cron_remove, pkg_cron_cleanup_legacy (glob-based);
+      pkg_cron_preserve_schedule (capture 5-field schedule with eval validation),
+      pkg_cron_restore_schedule (restore with sed * escaping);
+      _pkg_cron_read_schedule shared helper for deduplication
+  [New] Documentation installation: pkg_man_install (copy + optional sed pairs +
+      gzip + install to auto-detected man dir via _pkg_man_dir helper),
+      pkg_bash_completion, pkg_logrotate_install (via shared _pkg_install_sysfile
+      helper), pkg_doc_install (README/CHANGELOG/LICENSE to doc dir)
+  [New] Config migration: pkg_config_merge (AWK two-pass merge preserving old
+      values into new template), pkg_config_migrate_var (rename variable with
+      optional upper/lower transform), pkg_config_clamp (clamp numeric config
+      value to maximum with warning); pkg_config_get (AWK single-pass value
+      extraction with quote stripping), pkg_config_set (sed-based in-place
+      update or append, pipe-char safe)
+  [New] FHS layout: pkg_fhs_register (parallel indexed array registry for
+      src/dest/mode/type file mappings), pkg_fhs_install (install registered
+      files with directory creation and permissions, failure counting);
+      pkg_fhs_symlink_farm (backward-compat symlinks from legacy to FHS paths),
+      pkg_fhs_symlink_farm_cleanup (remove symlinks and empty directories);
+      pkg_fhs_gen_rpm_files (RPM %files with %config(noreplace) and %dir dedup),
+      pkg_fhs_gen_deb_dirs, pkg_fhs_gen_deb_links, pkg_fhs_gen_deb_conffiles,
+      pkg_fhs_gen_sed_pairs (sed expressions for path transformation)
+  [New] Uninstall primitives: pkg_uninstall_confirm (interactive y/N prompt),
+      pkg_uninstall_files (files/dirs with silent skip for missing),
+      pkg_uninstall_man (multi-location man page removal),
+      pkg_uninstall_cron, pkg_uninstall_logrotate, pkg_uninstall_completion,
+      pkg_uninstall_sysconfig (RHEL + Debian paths)
+  [New] Manifest support: pkg_manifest_load (source manifest file),
+      pkg_manifest_validate (check PKG_NAME/VERSION/SUMMARY/INSTALL_PATH)
+  [New] pkg_gen.sh — manifest-driven packaging artifact generator: reads
+      pkg.manifest and templates, performs @@PLACEHOLDER@@ substitution,
+      handles conditional blocks (@@IF_*@@/@@ENDIF_*@@) for feature flags,
+      produces project-specific RPM spec, DEB debian/, Docker, Makefile,
+      GHA workflow, and test artifacts; two-level token model for project
+      customization; pipe-char safe sed escaping
+  [New] Packaging templates: RPM spec (project.spec.in), DEB debian/ (control,
+      rules, conffiles, dirs, links, preinst, postinst, postrm, changelog,
+      copyright, source/format), Docker build/test Dockerfiles (el7, el9,
+      deb), Makefile (tarball + native + Docker builds), GHA release workflow,
+      package install verification script — all with @@PLACEHOLDER@@ tokens
+  [New] README.md with library overview, quick-start examples, full function
+      reference, pkg_gen.sh usage, manifest format, and template inventory
+  [New] Test suite: 454 tests across 14 files covering all library sections;
+      9-OS Docker test matrix (debian12, centos6-rocky10, ubuntu 12.04-24.04);
+      CI workflow with lint + batsman reusable test workflow
+  [Fix] Test assertions: replaced bare `! grep -q` with `run grep -q` +
+      status check for proper BATS error handling (QA-001)
+  [Fix] pkg_gen.sh: escape pipe character in sed substitution values to prevent
+      breakage when manifest values contain | (QA-004)
+  [Fix] pkg_gen.sh: removed dead _gen_warn() function (QA-002)
+  [Fix] pkg_gen.sh: corrected misleading awk comment in conditional block
+      cleanup to match actual behavior (QA-003)
