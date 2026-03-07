@@ -2,6 +2,7 @@ ARG BASE_IMAGE=pkg-base-ubuntu2004
 FROM ${BASE_IMAGE}
 
 COPY files/ /opt/files/
+COPY pkg/ /opt/pkg/
 COPY tests/ /opt/tests/
 
 WORKDIR /opt/tests

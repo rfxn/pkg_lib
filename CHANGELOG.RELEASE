@@ -1,6 +1,17 @@
 pkg_lib v1.0.0 | Mar 06 2026:
 
 -- New Features --
+  [New] pkg_gen.sh — manifest-driven packaging artifact generator: reads
+      pkg.manifest and templates, performs @@PLACEHOLDER@@ substitution,
+      handles conditional blocks (@@IF_*@@/@@ENDIF_*@@) for feature flags,
+      produces project-specific RPM spec, DEB debian/, Docker, Makefile,
+      GHA workflow, and test artifacts
+  [New] Conditional block handling (@@IF_*@@/@@ENDIF_*@@) for feature flags
+      in templates: enabled features keep content, disabled features remove
+      entire block including markers
+  [New] Generator test suite (tests/13-generator.bats, 25 tests): output
+      structure, placeholder substitution, conditional blocks, dry-run mode,
+      environment variable config, two-level token preservation
   [New] Packaging templates: RPM spec template (project.spec.in) with
       @@PLACEHOLDER@@ tokens for project-specific metadata, requires,
       scriptlets, and file lists — generalized from BFD's production spec
@@ -18,6 +29,10 @@ pkg_lib v1.0.0 | Mar 06 2026:
       RPM (el7, el9) + DEB (debian12) builds and release asset upload
 
 -- Fixes --
+  [Fix] Template placeholder documentation: added @@PLACEHOLDER@@ comment
+      blocks to copyright.in and changelog.in (QA-002)
+  [Fix] Template inline comments: added justification for SysVinit service
+      stop error suppression in preinst.in (QA-003)
   [Fix] pkg_fhs_install/pkg_fhs_symlink_farm: use separate failure counter
       instead of boolean rc for accurate installed/linked count reporting
   [Fix] pkg_fhs_gen_sed_pairs: corrected docstring to match implementation

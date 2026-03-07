@@ -32,18 +32,25 @@ case "$1" in
                 # cp may fail if tmp/ is empty — safe to ignore
                 cp -a "$LEGACY_PATH"/tmp/* /var/lib/@@PKG_NAME@@/tmp/ 2>/dev/null || true
             fi
-            # Stop SysVinit services if present
+            # Stop SysVinit services if present — the old install.sh-based
+            # installation may have registered init scripts that conflict with
+            # the package's own service units; stop and deregister them so the
+            # package post-install can set up services cleanly.
             for _initdir in /etc/rc.d/init.d /etc/init.d; do
                 if [ -f "$_initdir/@@PKG_BIN_NAME@@" ]; then
+                    # Service may not be running — safe to ignore stop failure
                     "$_initdir/@@PKG_BIN_NAME@@" stop 2>/dev/null || true
                     if command -v chkconfig >/dev/null 2>&1; then
+                        # chkconfig may fail if service was never added — safe to ignore
                         chkconfig --del @@PKG_BIN_NAME@@ 2>/dev/null || true
                     elif command -v update-rc.d >/dev/null 2>&1; then
+                        # update-rc.d may fail if links already removed — safe to ignore
                         update-rc.d -f @@PKG_BIN_NAME@@ remove 2>/dev/null || true
                     fi
                 fi
             done
-            # Stop systemd services before removing old install
+            # Stop systemd services before removing old install — service may
+            # not exist or may not be running; either case is safe to ignore
             if command -v systemctl >/dev/null 2>&1; then
                 systemctl stop @@PKG_BIN_NAME@@.service 2>/dev/null || true
             fi
