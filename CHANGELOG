@@ -1,6 +1,11 @@
 pkg_lib CHANGELOG
 ==================
 
+- v1.0.2 | Mar 07 2026:
+  [Fix] Replace hardcoded /usr/bin/cp with portable `command cp` across all 14
+      call sites; fixes failures on CentOS 6 and Ubuntu 12.04 where cp lives
+      at /bin/cp (no usr-merge)
+
 - v1.0.1 | Mar 07 2026:
   [New] README: add integration guide with install.sh/uninstall.sh boilerplate
       templates, config migration pattern, and consumer project references
