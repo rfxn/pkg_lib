@@ -171,12 +171,12 @@ inject_init() {
 }
 
 @test "_pkg_service_ctl: falls back to init script" {
-	# Ensure no systemctl in PATH
+	# Remove systemctl from PATH — filter mock dir AND any dir with real systemctl
 	local clean_path=""
 	local p
 	IFS=: read -ra path_parts <<< "$PATH"
 	for p in "${path_parts[@]}"; do
-		if [[ "$p" != "$MOCK_BIN" ]]; then
+		if [[ "$p" != "$MOCK_BIN" ]] && ! [[ -x "${p}/systemctl" ]]; then
 			if [[ -n "$clean_path" ]]; then
 				clean_path="${clean_path}:${p}"
 			else
@@ -185,15 +185,8 @@ inject_init() {
 		fi
 	done
 
-	# Create mock init script
-	mkdir -p "${TEST_TMPDIR}/etc/init.d"
-	cat > "${TEST_TMPDIR}/etc/init.d/myservice" <<'INITEOF'
-#!/bin/bash
-echo "init $1" >> /tmp/_pkg_test_init.log
-INITEOF
-	chmod +x "${TEST_TMPDIR}/etc/init.d/myservice"
-
-	# Can't easily override /etc/init.d lookup; test error path instead
+	# With no systemctl, _pkg_service_ctl falls through to SysV init lookup;
+	# nonexistent service name ensures _pkg_init_script_path returns 1
 	PATH="$clean_path" run _pkg_service_ctl "start" "nonexistent_svc_xyz"
 	[[ "$status" -eq 1 ]]
 	[[ "$output" == *"no init method"* ]]
