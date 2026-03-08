@@ -5,10 +5,7 @@ pkg_lib CHANGELOG
   [Fix] Replace hardcoded /usr/bin/cp with portable `command cp` across all 14
       call sites; fixes failures on CentOS 6 and Ubuntu 12.04 where cp lives
       at /bin/cp (no usr-merge)
-  [Change] README: add CI, version, bash, and license badges matching shared
-      library convention; add consumer project links; update version to 1.0.2
-  [Fix] Test: _pkg_service_ctl fallback test now filters real systemctl from
-      PATH (not just mock); fixes pre-existing CentOS 7 CI failure
+  [Change] README: add consumer project links and CI badges
 
 - v1.0.1 | Mar 07 2026:
   [New] README: add integration guide with install.sh/uninstall.sh boilerplate
