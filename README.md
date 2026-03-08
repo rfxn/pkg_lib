@@ -1,14 +1,19 @@
-# pkg_lib -- Shared Packaging & Installer Library
+# pkg_lib — Shared Packaging & Installer Library
+
+[![CI](https://github.com/rfxn/pkg_lib/actions/workflows/ci.yml/badge.svg)](https://github.com/rfxn/pkg_lib/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-1.0.2-blue.svg)](https://github.com/rfxn/pkg_lib)
+[![Bash](https://img.shields.io/badge/bash-4.1%2B-green.svg)](https://www.gnu.org/software/bash/)
+[![License](https://img.shields.io/badge/license-GPL%20v2-orange.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)
 
 Unified packaging, install, and uninstall primitives for rfxn projects (BFD, APF, LMD).
 Provides consistent output formatting, OS detection, dependency checking, backup/restore,
 file operations, service lifecycle management, cron/logrotate/man page installation,
-config migration, FHS layout, symlink farms, and uninstall -- all driven by environment
+config migration, FHS layout, symlink farms, and uninstall — all driven by environment
 variables with zero project-specific code.
 
-**Version:** 1.0.0
-**License:** GNU GPL v2
-**Organization:** R-fx Networks
+Consumed by [BFD](https://github.com/rfxn/brute-force-detection),
+[APF](https://github.com/rfxn/advanced-policy-firewall), and
+[LMD](https://github.com/rfxn/linux-malware-detect) via source inclusion.
 
 ## Architecture
 
