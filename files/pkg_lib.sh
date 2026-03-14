@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# pkg_lib.sh — Shared Packaging & Installer Library 1.0.2
+# pkg_lib.sh — Shared Packaging & Installer Library 1.0.3
 ###
 # Copyright (C) 2002-2026 R-fx Networks <proj@rfxn.com>
 #                         Ryan MacDonald <ryan@rfxn.com>
