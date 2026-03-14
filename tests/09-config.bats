@@ -305,6 +305,53 @@ EOF
 	[[ "$output" == *"not found"* ]]
 }
 
+@test "pkg_config_merge: preserves permissions of template file" {
+	local old="${TEST_TMPDIR}/old.conf"
+	local new="${TEST_TMPDIR}/new.conf"
+	local out="${TEST_TMPDIR}/merged.conf"
+
+	echo 'VAR1="oldval"' > "$old"
+	echo 'VAR1="default"' > "$new"
+	chmod 640 "$new"
+
+	pkg_config_merge "$old" "$new" "$out"
+
+	local mode
+	mode=$(stat -c '%a' "$out")
+	[[ "$mode" = "640" ]]
+}
+
+@test "pkg_config_merge: preserves permissions through symlink template" {
+	local old="${TEST_TMPDIR}/old.conf"
+	local real="${TEST_TMPDIR}/real.conf"
+	local link="${TEST_TMPDIR}/link.conf"
+	local out="${TEST_TMPDIR}/merged_link.conf"
+
+	echo 'VAR1="oldval"' > "$old"
+	echo 'VAR1="default"' > "$real"
+	chmod 640 "$real"
+	ln -sf "$real" "$link"
+
+	pkg_config_merge "$old" "$link" "$out"
+
+	local mode
+	mode=$(stat -c '%a' "$out")
+	[[ "$mode" = "640" ]]
+}
+
+@test "pkg_config_merge: creates output without error when template has default permissions" {
+	local old="${TEST_TMPDIR}/old.conf"
+	local new="${TEST_TMPDIR}/new.conf"
+	local out="${TEST_TMPDIR}/merged_default.conf"
+
+	echo 'VAR1="oldval"' > "$old"
+	echo 'VAR1="default"' > "$new"
+
+	run pkg_config_merge "$old" "$new" "$out"
+	[[ "$status" -eq 0 ]]
+	[[ -f "$out" ]]
+}
+
 @test "pkg_config_merge: preserves empty lines from new template" {
 	local old="${TEST_TMPDIR}/old.conf"
 	local new="${TEST_TMPDIR}/new.conf"

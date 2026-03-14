@@ -1,6 +1,5 @@
-pkg_lib v1.0.2 | Mar 07 2026:
+pkg_lib v1.0.3 | Mar 14 2026:
 
-  [Fix] Replace hardcoded /usr/bin/cp with portable `command cp` across all 14
-      call sites; fixes failures on CentOS 6 and Ubuntu 12.04 where cp lives
-      at /bin/cp (no usr-merge)
-  [Change] README: add consumer project links and CI badges
+  [New] pkg_config_merge: preserve permissions of template file on output;
+      uses stat -Lc (GNU) with stat -Lf (FreeBSD) fallback chain;
+      dereferences symlinks to get target permissions
