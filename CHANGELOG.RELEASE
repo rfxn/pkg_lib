@@ -1,4 +1,5 @@
 pkg_lib v1.0.3 | Mar 14 2026:
 
   [New] pkg_config_merge: preserve permissions of template file on output;
-      uses stat -c (GNU) with stat -f (FreeBSD) fallback chain
+      uses stat -Lc (GNU) with stat -Lf (FreeBSD) fallback chain;
+      dereferences symlinks to get target permissions
