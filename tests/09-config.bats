@@ -559,6 +559,18 @@ EOF
 	[[ "$output" = "cmd1|cmd2" ]]
 }
 
+@test "pkg_config_migrate_var: preserves backslash in value" {
+	local conf="${TEST_TMPDIR}/bslash.conf"
+	printf 'OLD_VAR="path\\here"\n' > "$conf"
+
+	run pkg_config_migrate_var "$conf" "OLD_VAR" "NEW_VAR"
+	[[ "$status" -eq 0 ]]
+
+	run pkg_config_get "$conf" "NEW_VAR"
+	[[ "$status" -eq 0 ]]
+	[[ "$output" = 'path\here' ]]
+}
+
 # ── pkg_config_clamp ─────────────────────────────────────────────
 
 @test "pkg_config_clamp: clamps value exceeding max" {

@@ -590,7 +590,7 @@ pkg_backup() {
 	# Update .bk.last symlink (or configured name)
 	local symlink_path
 	symlink_path="$(dirname "$install_path")/${PKG_BACKUP_SYMLINK}"
-	rm -f "$symlink_path"
+	command rm -f "$symlink_path"
 	ln -s "$backup_path" "$symlink_path" || {
 		pkg_warn "pkg_backup: failed to create symlink ${symlink_path}"
 	}
@@ -703,7 +703,7 @@ pkg_backup_prune() {
 
 		# Check age using find -maxdepth 0 -mtime
 		if find "$entry_path" -maxdepth 0 -mtime +"$max_age_days" -print 2>/dev/null | read -r _; then
-			rm -rf "$entry_path"
+			command rm -rf "$entry_path"
 			pruned=$((pruned + 1))
 		fi
 	done < <(find "$parent_dir" -maxdepth 1 -mindepth 1 -printf '%f\n' 2>/dev/null)
@@ -961,7 +961,7 @@ pkg_symlink() {
 	fi
 
 	# Remove existing link or file at link_path
-	rm -f "$link_path" 2>/dev/null  # safe: only removes file/symlink, not dir
+	command rm -f "$link_path" 2>/dev/null  # safe: only removes file/symlink, not dir
 
 	ln -s "$target" "$link_path" || {
 		pkg_error "pkg_symlink: failed to create symlink ${link_path} -> ${target}"
@@ -985,7 +985,7 @@ pkg_symlink_cleanup() {
 	local link_path
 	for link_path in "$@"; do
 		if [[ -L "$link_path" ]]; then
-			rm -f "$link_path"
+			command rm -f "$link_path"
 		elif [[ -e "$link_path" ]]; then
 			pkg_warn "pkg_symlink_cleanup: skipping non-symlink: ${link_path}"
 		fi
@@ -1228,10 +1228,10 @@ pkg_service_uninstall() {
 		systemctl disable "$name" 2>/dev/null   # safe: ignore if not enabled
 	fi
 
-	rm -f "/usr/lib/systemd/system/${name}.service" 2>/dev/null  # safe: may not exist
-	rm -f "/lib/systemd/system/${name}.service" 2>/dev/null      # safe: may not exist
-	rm -f "/usr/lib/systemd/system/${name}.timer" 2>/dev/null    # safe: timer variant
-	rm -f "/lib/systemd/system/${name}.timer" 2>/dev/null        # safe: timer variant
+	command rm -f "/usr/lib/systemd/system/${name}.service" 2>/dev/null  # safe: may not exist
+	command rm -f "/lib/systemd/system/${name}.service" 2>/dev/null      # safe: may not exist
+	command rm -f "/usr/lib/systemd/system/${name}.timer" 2>/dev/null    # safe: timer variant
+	command rm -f "/lib/systemd/system/${name}.timer" 2>/dev/null        # safe: timer variant
 
 	if command -v systemctl >/dev/null 2>&1; then
 		systemctl daemon-reload 2>/dev/null  # safe: refresh after removal
@@ -1259,15 +1259,15 @@ pkg_service_uninstall() {
 	fi
 
 	# 6. Remove init scripts from both possible locations
-	rm -f "/etc/init.d/${name}" 2>/dev/null          # safe: may not exist
-	rm -f "/etc/rc.d/init.d/${name}" 2>/dev/null     # safe: may not exist
+	command rm -f "/etc/init.d/${name}" 2>/dev/null          # safe: may not exist
+	command rm -f "/etc/rc.d/init.d/${name}" 2>/dev/null     # safe: may not exist
 
 	# 7. Slackware S-links
 	local rl rc_dir
 	for rl in 2 3 4 5; do
 		rc_dir="/etc/rc.d/rc${rl}.d"
 		if [[ -d "$rc_dir" ]]; then
-			rm -f "${rc_dir}/"S*"${name}" 2>/dev/null  # safe: glob may match nothing
+			command rm -f "${rc_dir}/"S*"${name}" 2>/dev/null  # safe: glob may match nothing
 		fi
 	done
 
@@ -1391,8 +1391,8 @@ pkg_service_uninstall_multi() {
 			systemctl disable "${name}${suffix}" 2>/dev/null  # safe: may not be enabled
 		fi
 		# Remove from both possible systemd dirs
-		rm -f "/usr/lib/systemd/system/${name}${suffix}" 2>/dev/null  # safe: may not exist
-		rm -f "/lib/systemd/system/${name}${suffix}" 2>/dev/null      # safe: may not exist
+		command rm -f "/usr/lib/systemd/system/${name}${suffix}" 2>/dev/null  # safe: may not exist
+		command rm -f "/lib/systemd/system/${name}${suffix}" 2>/dev/null      # safe: may not exist
 	done
 
 	# Single daemon-reload after all removals
@@ -1643,7 +1643,7 @@ pkg_service_disable() {
 		for rl in $PKG_SLACKWARE_RUNLEVELS; do
 			rc_dir="/etc/rc.d/rc${rl}.d"
 			if [[ -d "$rc_dir" ]]; then
-				rm -f "${rc_dir}/"S*"${name}" 2>/dev/null  # safe: glob may match nothing
+				command rm -f "${rc_dir}/"S*"${name}" 2>/dev/null  # safe: glob may match nothing
 			fi
 		done
 		return 0
@@ -1872,7 +1872,7 @@ pkg_rclocal_remove() {
 		grep -v "$pattern" "$path" > "$tmpfile" 2>/dev/null || true  # safe: grep -v returns 1 when all lines match
 		command mv -f "$tmpfile" "$path" || {
 			pkg_warn "pkg_rclocal_remove: failed to update ${path}"
-			rm -f "$tmpfile"
+			command rm -f "$tmpfile"
 		}
 	done
 
@@ -1951,7 +1951,7 @@ pkg_cron_remove() {
 	local path
 	for path in "$@"; do
 		if [[ -f "$path" ]]; then
-			rm -f "$path" || pkg_warn "pkg_cron_remove: failed to remove ${path}"
+			command rm -f "$path" || pkg_warn "pkg_cron_remove: failed to remove ${path}"
 		fi
 	done
 
@@ -1974,7 +1974,7 @@ pkg_cron_cleanup_legacy() {
 		# Expand glob — no-op if pattern matches nothing
 		for path in $pattern; do
 			if [[ -f "$path" ]]; then
-				rm -f "$path" || pkg_warn "pkg_cron_cleanup_legacy: failed to remove ${path}"
+				command rm -f "$path" || pkg_warn "pkg_cron_cleanup_legacy: failed to remove ${path}"
 			fi
 		done
 	done
@@ -2167,7 +2167,7 @@ pkg_man_install() {
 
 	command cp -f "$src" "$tmpfile" || {
 		pkg_error "pkg_man_install: failed to copy source to temp"
-		rm -f "$tmpfile"
+		command rm -f "$tmpfile"
 		return 1
 	}
 
@@ -2189,7 +2189,7 @@ pkg_man_install() {
 	# Compress
 	gzip -f "$tmpfile" || {
 		pkg_error "pkg_man_install: gzip failed"
-		rm -f "$tmpfile"
+		command rm -f "$tmpfile"
 		return 1
 	}
 
@@ -2197,11 +2197,11 @@ pkg_man_install() {
 	local dest="${man_dir}/${name}.${section}.gz"
 	command cp -f "${tmpfile}.gz" "$dest" || {
 		pkg_error "pkg_man_install: failed to install to ${dest}"
-		rm -f "${tmpfile}.gz"
+		command rm -f "${tmpfile}.gz"
 		return 1
 	}
 	chmod 644 "$dest"
-	rm -f "${tmpfile}.gz"
+	command rm -f "${tmpfile}.gz"
 
 	pkg_info "installed man page: ${name}(${section})"
 	return 0
@@ -2518,13 +2518,13 @@ pkg_config_merge() {
 	}
 	' "$old_conf" "$new_conf" > "$_tmp_output" || {
 		pkg_error "pkg_config_merge: awk merge failed"
-		rm -f "$_tmp_output"
+		command rm -f "$_tmp_output"
 		return 1
 	}
 
 	command mv -f "$_tmp_output" "$output" || {
 		pkg_error "pkg_config_merge: failed to write merged output to ${output}"
-		rm -f "$_tmp_output"
+		command rm -f "$_tmp_output"
 		return 1
 	}
 
@@ -2866,7 +2866,7 @@ pkg_fhs_symlink_farm_cleanup() {
 	for ((i = 0; i < count; i++)); do
 		legacy_path="${legacy_root}/${_PKG_FHS_SRCS[$i]}"
 		if [[ -L "$legacy_path" ]]; then
-			rm -f "$legacy_path"
+			command rm -f "$legacy_path"
 		fi
 	done
 
@@ -3068,9 +3068,9 @@ pkg_uninstall_files() {
 		fi
 
 		if [[ -d "$path" ]] && [[ ! -L "$path" ]]; then
-			rm -rf "$path" || pkg_warn "pkg_uninstall_files: failed to remove directory ${path}"
+			command rm -rf "$path" || pkg_warn "pkg_uninstall_files: failed to remove directory ${path}"
 		else
-			rm -f "$path" || pkg_warn "pkg_uninstall_files: failed to remove ${path}"
+			command rm -f "$path" || pkg_warn "pkg_uninstall_files: failed to remove ${path}"
 		fi
 	done
 
@@ -3094,8 +3094,8 @@ pkg_uninstall_man() {
 	local man_dirs="/usr/share/man /usr/local/share/man /usr/local/man"
 	local dir
 	for dir in $man_dirs; do
-		rm -f "${dir}/man${section}/${name}.${section}" 2>/dev/null     # uncompressed
-		rm -f "${dir}/man${section}/${name}.${section}.gz" 2>/dev/null  # gzipped
+		command rm -f "${dir}/man${section}/${name}.${section}" 2>/dev/null     # uncompressed
+		command rm -f "${dir}/man${section}/${name}.${section}.gz" 2>/dev/null  # gzipped
 	done
 
 	return 0
@@ -3114,7 +3114,7 @@ pkg_uninstall_cron() {
 	local path
 	for path in "$@"; do
 		if [[ -f "$path" ]] || [[ -L "$path" ]]; then
-			rm -f "$path" || pkg_warn "pkg_uninstall_cron: failed to remove ${path}"
+			command rm -f "$path" || pkg_warn "pkg_uninstall_cron: failed to remove ${path}"
 		fi
 	done
 
@@ -3134,7 +3134,7 @@ pkg_uninstall_logrotate() {
 		return 1
 	fi
 
-	rm -f "/etc/logrotate.d/${name}" 2>/dev/null  # best-effort removal
+	command rm -f "/etc/logrotate.d/${name}" 2>/dev/null  # best-effort removal
 	return 0
 }
 
@@ -3151,7 +3151,7 @@ pkg_uninstall_completion() {
 		return 1
 	fi
 
-	rm -f "/etc/bash_completion.d/${name}" 2>/dev/null  # best-effort removal
+	command rm -f "/etc/bash_completion.d/${name}" 2>/dev/null  # best-effort removal
 	return 0
 }
 
@@ -3168,8 +3168,8 @@ pkg_uninstall_sysconfig() {
 		return 1
 	fi
 
-	rm -f "/etc/sysconfig/${name}" 2>/dev/null  # RHEL-family
-	rm -f "/etc/default/${name}" 2>/dev/null    # Debian-family
+	command rm -f "/etc/sysconfig/${name}" 2>/dev/null  # RHEL-family
+	command rm -f "/etc/default/${name}" 2>/dev/null    # Debian-family
 	return 0
 }
 

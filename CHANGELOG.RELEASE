@@ -15,3 +15,5 @@ pkg_lib v1.0.5 | Mar 16 2026:
   [Fix] README: correct pkg_uninstall_man signature to section name
   [Fix] README: correct pkg_service_uninstall_multi signature to name suffixes
   [Change] README: annotate config merge examples as safe for in-place use
+  [Fix] Replace bare rm with command rm across all 33 call sites for
+      alias-bypass portability (class-wide fix per QA-002)
