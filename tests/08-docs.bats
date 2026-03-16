@@ -144,6 +144,32 @@ teardown() {
 	rm -f "${man_dir}/myapp.8.gz"
 }
 
+@test "pkg_man_install: handles sed-special chars in replacement pairs" {
+	local src="${TEST_TMPDIR}/myapp.8"
+	echo 'path: /opt/app&old version: 1.0/2' > "$src"
+
+	# Need man8 dir
+	local man_dir
+	if [[ -d /usr/share/man/man8 ]]; then
+		man_dir="/usr/share/man/man8"
+	elif [[ -d /usr/local/share/man/man8 ]]; then
+		man_dir="/usr/local/share/man/man8"
+	else
+		skip "no man8 directory"
+	fi
+
+	# Replacement pairs with & and / characters that need escaping
+	run pkg_man_install "$src" "8" "myapp" "/opt/app&old|/new/path&dir" "1.0/2|3.0/4"
+	[[ "$status" -eq 0 ]]
+
+	local content
+	content=$(zcat "${man_dir}/myapp.8.gz")
+	echo "$content" | grep -q '/new/path&dir'
+	echo "$content" | grep -q '3.0/4'
+	# Cleanup
+	rm -f "${man_dir}/myapp.8.gz"
+}
+
 @test "pkg_man_install: fails with empty arguments" {
 	run pkg_man_install "" "8" "myapp"
 	[[ "$status" -eq 1 ]]

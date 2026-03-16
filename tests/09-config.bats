@@ -154,6 +154,32 @@ EOF
 	[[ "$output" == *"not found"* ]]
 }
 
+@test "pkg_config_set: rejects variable name with regex metacharacters" {
+	run pkg_config_set "$MOCK_CONF" "BAD.*VAR" "value"
+	[[ "$status" -eq 1 ]]
+	[[ "$output" == *"invalid variable name"* ]]
+}
+
+@test "pkg_config_set: rejects variable name starting with digit" {
+	run pkg_config_set "$MOCK_CONF" "9VAR" "value"
+	[[ "$status" -eq 1 ]]
+	[[ "$output" == *"invalid variable name"* ]]
+}
+
+@test "pkg_config_set: rejects empty variable name" {
+	run pkg_config_set "$MOCK_CONF" "" "value"
+	[[ "$status" -eq 1 ]]
+	[[ "$output" == *"required"* ]]
+}
+
+@test "pkg_config_set: accepts variable name with underscores and digits" {
+	run pkg_config_set "$MOCK_CONF" "_MY_VAR_2" "test_value"
+	[[ "$status" -eq 0 ]]
+
+	run pkg_config_get "$MOCK_CONF" "_MY_VAR_2"
+	[[ "$output" = "test_value" ]]
+}
+
 @test "pkg_config_set: handles pipe character in value" {
 	pkg_config_set "$MOCK_CONF" "DB_HOST" "foo|bar|baz"
 

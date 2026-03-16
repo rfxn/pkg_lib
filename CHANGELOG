@@ -1,6 +1,13 @@
 pkg_lib CHANGELOG
 ==================
 
+- v1.0.4 | Mar 15 2026:
+  [Fix] pkg_config_set: validate $var as safe shell variable name
+      [a-zA-Z_][a-zA-Z0-9_]* to prevent regex/sed injection via
+      crafted variable names
+  [Fix] pkg_man_install: escape $old_str and $new_str in sed replacement
+      pairs using same pattern as pkg_sed_replace (handle &, |, /, \)
+
 - v1.0.3 | Mar 14 2026:
   [New] pkg_config_merge: preserve permissions of template file on output;
       uses stat -Lc (GNU) with stat -Lf (FreeBSD) fallback chain;
