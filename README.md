@@ -1,7 +1,7 @@
 # pkg_lib — Shared Packaging & Installer Library
 
 [![CI](https://github.com/rfxn/pkg_lib/actions/workflows/ci.yml/badge.svg)](https://github.com/rfxn/pkg_lib/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-1.0.2-blue.svg)](https://github.com/rfxn/pkg_lib)
+[![Version](https://img.shields.io/badge/version-1.0.5-blue.svg)](https://github.com/rfxn/pkg_lib)
 [![Bash](https://img.shields.io/badge/bash-4.1%2B-green.svg)](https://www.gnu.org/software/bash/)
 [![License](https://img.shields.io/badge/license-GPL%20v2-orange.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)
 
@@ -264,7 +264,7 @@ variables from the current template:
 BK_LAST="${BK_LAST:-}"
 [ -z "$BK_LAST" ] && { echo "No backup path provided"; exit 1; }
 
-# Merge old config values into new template
+# In-place merge: output == new template is safe (v1.0.5+)
 pkg_config_merge "$BK_LAST/conf.myproject" "$INSPATH/conf.myproject" \
     "$INSPATH/conf.myproject"
 
@@ -307,6 +307,7 @@ pkg_backup "/usr/local/myproject"
 rm -rf "/usr/local/myproject"
 pkg_copy_tree "./files" "/usr/local/myproject"
 BK_LAST=$(pkg_backup_path "/usr/local/myproject")
+# In-place merge: output == new template is safe (v1.0.5+)
 pkg_config_merge "$BK_LAST/conf.myproject" \
     "/usr/local/myproject/conf.myproject" \
     "/usr/local/myproject/conf.myproject"
@@ -469,7 +470,7 @@ sourcing `pkg_lib.sh`:
 | `pkg_service_uninstall name` | Remove service from all locations |
 | `pkg_service_install_timer name source_file` | Install systemd timer unit |
 | `pkg_service_install_multi services...` | Install multiple service units |
-| `pkg_service_uninstall_multi services...` | Uninstall multiple service units |
+| `pkg_service_uninstall_multi name suffixes...` | Uninstall multiple related service units |
 | `pkg_service_start name` | Start service (systemd or SysV cascade) |
 | `pkg_service_stop name` | Stop service |
 | `pkg_service_restart name` | Restart service |
@@ -530,7 +531,7 @@ sourcing `pkg_lib.sh`:
 |----------|-------------|
 | `pkg_uninstall_confirm name` | Interactive y/N confirmation prompt |
 | `pkg_uninstall_files paths...` | Remove files and directories (silent skip for missing) |
-| `pkg_uninstall_man name sections...` | Remove man pages from all standard locations |
+| `pkg_uninstall_man section name` | Remove man pages from all standard locations |
 | `pkg_uninstall_cron files...` | Remove cron files |
 | `pkg_uninstall_logrotate name` | Remove logrotate configuration |
 | `pkg_uninstall_completion name` | Remove bash completion file |

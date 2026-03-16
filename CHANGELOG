@@ -13,6 +13,10 @@ pkg_lib CHANGELOG
   [Fix] pkg_backup, pkg_rclocal_remove: replace bare mv with command mv
       for alias-bypass portability
   [Change] pkg_config_get: remove dead AWK variable assignment
+  [Fix] README: update version badge from 1.0.2 to 1.0.5
+  [Fix] README: correct pkg_uninstall_man signature to section name
+  [Fix] README: correct pkg_service_uninstall_multi signature to name suffixes
+  [Change] README: annotate config merge examples as safe for in-place use
 
 - v1.0.4 | Mar 15 2026:
   [Fix] pkg_config_set: validate $var as safe shell variable name
