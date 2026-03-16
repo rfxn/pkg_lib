@@ -1,7 +1,13 @@
-pkg_lib v1.0.4 | Mar 15 2026:
+pkg_lib v1.0.5 | Mar 16 2026:
 
-  [Fix] pkg_config_set: validate $var as safe shell variable name
-      [a-zA-Z_][a-zA-Z0-9_]* to prevent regex/sed injection via
-      crafted variable names
-  [Fix] pkg_man_install: escape $old_str and $new_str in sed replacement
-      pairs using same pattern as pkg_sed_replace (handle &, |, /, \)
+  [Fix] pkg_config_merge: use temp file for AWK output to prevent data loss
+      when output path equals new_conf path
+  [Fix] pkg_config_migrate_var: escape sed metacharacters in migrated values
+      to prevent output corruption with &, |, /, \ characters
+  [Fix] pkg_config_migrate_var: validate old_var and new_var as safe shell
+      identifiers before use in grep/sed patterns
+  [Fix] pkg_config_get: validate var name as safe shell identifier before
+      use in grep pattern
+  [Fix] pkg_backup, pkg_rclocal_remove: replace bare mv with command mv
+      for alias-bypass portability
+  [Change] pkg_config_get: remove dead AWK variable assignment

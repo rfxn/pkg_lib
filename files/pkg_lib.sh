@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# pkg_lib.sh — Shared Packaging & Installer Library 1.0.4
+# pkg_lib.sh — Shared Packaging & Installer Library 1.0.5
 ###
 # Copyright (C) 2002-2026 R-fx Networks <proj@rfxn.com>
 #                         Ryan MacDonald <ryan@rfxn.com>
@@ -29,7 +29,7 @@
 [[ -n "${_PKG_LIB_LOADED:-}" ]] && return 0 2>/dev/null
 _PKG_LIB_LOADED=1
 # shellcheck disable=SC2034 # version checked by consumers
-PKG_LIB_VERSION="1.0.4"
+PKG_LIB_VERSION="1.0.5"
 
 # Configurable defaults — consuming projects override via environment
 PKG_NO_COLOR="${PKG_NO_COLOR:-0}"
@@ -578,7 +578,7 @@ pkg_backup() {
 			command cp -pR "$install_path" "$backup_path" || rc=$?
 			;;
 		move)
-			mv "$install_path" "$backup_path" || rc=$?
+			command mv "$install_path" "$backup_path" || rc=$?
 			;;
 	esac
 
@@ -1870,7 +1870,7 @@ pkg_rclocal_remove() {
 			continue
 		}
 		grep -v "$pattern" "$path" > "$tmpfile" 2>/dev/null || true  # safe: grep -v returns 1 when all lines match
-		mv -f "$tmpfile" "$path" || {
+		command mv -f "$tmpfile" "$path" || {
 			pkg_warn "pkg_rclocal_remove: failed to update ${path}"
 			rm -f "$tmpfile"
 		}
@@ -2331,6 +2331,13 @@ pkg_config_get() {
 		return 1
 	fi
 
+	# Validate var name: must be a safe shell variable name
+	local _varname_re='^[a-zA-Z_][a-zA-Z0-9_]*$'
+	if [[ ! "$var" =~ $_varname_re ]]; then
+		pkg_error "pkg_config_get: invalid variable name: ${var}"
+		return 1
+	fi
+
 	local value
 	# Match VAR=value or VAR="value" or VAR='value'
 	# Use awk for single-pass extraction
@@ -2346,7 +2353,6 @@ pkg_config_get() {
 				# Strip surrounding quotes
 				gsub(/^[[:space:]]*["'"'"']|["'"'"'][[:space:]]*$/, "")
 				print
-				found = 1
 				exit
 			}
 		}
@@ -2468,6 +2474,12 @@ pkg_config_merge() {
 
 	# AWK two-pass merge: old values into new template
 	# Uses FILENAME instead of FNR==NR to handle empty old config correctly
+	local _tmp_output
+	_tmp_output=$(mktemp "${PKG_TMPDIR}/pkg_merge.XXXXXXXXXX") || {
+		pkg_error "pkg_config_merge: mktemp failed"
+		return 1
+	}
+
 	awk -v oldfile="$old_conf" '
 	# First file (old config): collect VAR=value pairs
 	FILENAME == oldfile {
@@ -2504,8 +2516,15 @@ pkg_config_merge() {
 		# No match — keep new template line as-is
 		print
 	}
-	' "$old_conf" "$new_conf" > "$output" || {
+	' "$old_conf" "$new_conf" > "$_tmp_output" || {
 		pkg_error "pkg_config_merge: awk merge failed"
+		rm -f "$_tmp_output"
+		return 1
+	}
+
+	command mv -f "$_tmp_output" "$output" || {
+		pkg_error "pkg_config_merge: failed to write merged output to ${output}"
+		rm -f "$_tmp_output"
 		return 1
 	}
 
@@ -2535,6 +2554,17 @@ pkg_config_migrate_var() {
 
 	if [[ ! -f "$conf_file" ]]; then
 		pkg_error "pkg_config_migrate_var: file not found: ${conf_file}"
+		return 1
+	fi
+
+	# Validate variable names: must be safe shell identifiers
+	local _varname_re='^[a-zA-Z_][a-zA-Z0-9_]*$'
+	if [[ ! "$old_var" =~ $_varname_re ]]; then
+		pkg_error "pkg_config_migrate_var: invalid variable name: ${old_var}"
+		return 1
+	fi
+	if [[ ! "$new_var" =~ $_varname_re ]]; then
+		pkg_error "pkg_config_migrate_var: invalid variable name: ${new_var}"
 		return 1
 	fi
 
@@ -2571,8 +2601,12 @@ pkg_config_migrate_var() {
 			;;
 	esac
 
+	# Escape old_val for sed replacement (handle &, |, /, \)
+	local esc_val
+	esc_val=$(printf '%s' "$old_val" | sed 's/[&|/\]/\\&/g')
+
 	# Replace old_var line with new_var and add migration comment
-	sed -i "s|^[[:space:]]*${old_var}=.*|# migrated: ${old_var} -> ${new_var}\n${new_var}=\"${old_val}\"|" "$conf_file" || {
+	sed -i "s|^[[:space:]]*${old_var}=.*|# migrated: ${old_var} -> ${new_var}\n${new_var}=\"${esc_val}\"|" "$conf_file" || {
 		pkg_error "pkg_config_migrate_var: sed failed on ${conf_file}"
 		return 1
 	}

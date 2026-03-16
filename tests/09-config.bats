@@ -92,6 +92,18 @@ EOF
 	[[ "$output" == *"not found"* ]]
 }
 
+@test "pkg_config_get: rejects variable name with regex metacharacters" {
+	run pkg_config_get "$MOCK_CONF" "BAD.*VAR"
+	[[ "$status" -eq 1 ]]
+	[[ "$output" == *"invalid variable name"* ]]
+}
+
+@test "pkg_config_get: accepts valid variable name with underscores" {
+	run pkg_config_get "$MOCK_CONF" "DB_HOST"
+	[[ "$status" -eq 0 ]]
+	[[ "$output" = "localhost" ]]
+}
+
 # ── pkg_config_set ────────────────────────────────────────────────
 
 @test "pkg_config_set: updates existing variable" {
@@ -394,6 +406,37 @@ EOF
 	[[ "$empty_count" -ge 1 ]]
 }
 
+@test "pkg_config_merge: output==new_conf produces correct merge" {
+	local old="${TEST_TMPDIR}/old.conf"
+	local new="${TEST_TMPDIR}/inplace.conf"
+
+	cat > "$old" <<'EOF'
+DB_HOST="myserver.example.com"
+DB_PORT="3306"
+EOF
+
+	cat > "$new" <<'EOF'
+# Config template
+DB_HOST="localhost"
+DB_PORT="5432"
+DB_NAME="default"
+EOF
+
+	# In-place merge: output is the same file as new_conf
+	run pkg_config_merge "$old" "$new" "$new"
+	[[ "$status" -eq 0 ]]
+	[[ -f "$new" ]]
+
+	# Must NOT be empty (the pre-fix bug)
+	[[ -s "$new" ]]
+
+	# Old values preserved
+	grep -q 'DB_HOST="myserver.example.com"' "$new"
+	grep -q 'DB_PORT="3306"' "$new"
+	# New-only variable keeps default
+	grep -q 'DB_NAME="default"' "$new"
+}
+
 # ── pkg_config_migrate_var ────────────────────────────────────────
 
 @test "pkg_config_migrate_var: renames variable" {
@@ -466,6 +509,54 @@ EOF
 	run pkg_config_migrate_var "${TEST_TMPDIR}/nonexistent" "OLD" "NEW"
 	[[ "$status" -eq 1 ]]
 	[[ "$output" == *"not found"* ]]
+}
+
+@test "pkg_config_migrate_var: rejects old_var with regex metacharacters" {
+	run pkg_config_migrate_var "$MOCK_CONF" "BAD.*VAR" "NEW_VAR"
+	[[ "$status" -eq 1 ]]
+	[[ "$output" == *"invalid variable name"* ]]
+}
+
+@test "pkg_config_migrate_var: rejects new_var with regex metacharacters" {
+	run pkg_config_migrate_var "$MOCK_CONF" "DB_HOST" "BAD[0]VAR"
+	[[ "$status" -eq 1 ]]
+	[[ "$output" == *"invalid variable name"* ]]
+}
+
+@test "pkg_config_migrate_var: preserves ampersand in value" {
+	local conf="${TEST_TMPDIR}/amp.conf"
+	echo 'OLD_VAR="foo&bar"' > "$conf"
+
+	run pkg_config_migrate_var "$conf" "OLD_VAR" "NEW_VAR"
+	[[ "$status" -eq 0 ]]
+
+	run pkg_config_get "$conf" "NEW_VAR"
+	[[ "$status" -eq 0 ]]
+	[[ "$output" = "foo&bar" ]]
+}
+
+@test "pkg_config_migrate_var: preserves slash in value" {
+	local conf="${TEST_TMPDIR}/slash.conf"
+	echo 'OLD_PATH="/usr/local/bin"' > "$conf"
+
+	run pkg_config_migrate_var "$conf" "OLD_PATH" "NEW_PATH"
+	[[ "$status" -eq 0 ]]
+
+	run pkg_config_get "$conf" "NEW_PATH"
+	[[ "$status" -eq 0 ]]
+	[[ "$output" = "/usr/local/bin" ]]
+}
+
+@test "pkg_config_migrate_var: preserves pipe in value" {
+	local conf="${TEST_TMPDIR}/pipe.conf"
+	echo 'OLD_CMD="cmd1|cmd2"' > "$conf"
+
+	run pkg_config_migrate_var "$conf" "OLD_CMD" "NEW_CMD"
+	[[ "$status" -eq 0 ]]
+
+	run pkg_config_get "$conf" "NEW_CMD"
+	[[ "$status" -eq 0 ]]
+	[[ "$output" = "cmd1|cmd2" ]]
 }
 
 # ── pkg_config_clamp ─────────────────────────────────────────────
