@@ -1,4 +1,8 @@
-pkg_lib v1.0.5 | Mar 16 2026:
+pkg_lib v1.0.5 | Mar 23 2026:
+
+  [Change] README: restructure for rfxn documentation convention floor compliance;
+      centered flat-square badges, bold one-liner, copyright blockquote, numbered
+      sections (## 1-8), exit codes table, ## License, ## Support
 
   [Fix] pkg_config_merge: use temp file for AWK output to prevent data loss
       when output path equals new_conf path
