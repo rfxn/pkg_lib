@@ -2,7 +2,7 @@
 
 <p align="center">
   <a href="https://github.com/rfxn/pkg_lib/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/rfxn/pkg_lib/ci.yml?style=flat-square&label=CI" alt="CI"></a>
-  <a href="CHANGELOG"><img src="https://img.shields.io/badge/version-1.0.5-blue.svg?style=flat-square" alt="Version"></a>
+  <a href="CHANGELOG"><img src="https://img.shields.io/badge/version-1.0.6-blue.svg?style=flat-square" alt="Version"></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.html"><img src="https://img.shields.io/badge/license-GPL_v2-green.svg?style=flat-square" alt="License"></a>
   <a href="https://www.gnu.org/software/bash/"><img src="https://img.shields.io/badge/bash-4.1%2B-orange.svg?style=flat-square" alt="Bash"></a>
 </p>
@@ -103,7 +103,7 @@ Source the library in your `install.sh` or `uninstall.sh`:
 | `files/pkg_lib.sh` | Runtime library -- source this in install/uninstall scripts |
 | `pkg/pkg_gen.sh` | Build-time generator -- produces RPM/DEB/Docker artifacts |
 | `pkg/templates/` | Template files consumed by pkg_gen.sh |
-| `tests/` | BATS test suite (454 tests, 14 files) |
+| `tests/` | BATS test suite (492 tests, 14 files) |
 
 ---
 
@@ -279,6 +279,8 @@ success and 1 on error. All error messages go to stderr.
 | `pkg_fhs_gen_deb_links legacy_root` | Generate DEB links list from registry |
 | `pkg_fhs_gen_deb_conffiles` | Generate DEB conffiles list from registry |
 | `pkg_fhs_gen_sed_pairs legacy_root` | Generate sed path-replacement expressions |
+| `pkg_fhs_gen_manifest legacy_root` | Generate tab-separated symlink manifest from FHS registry |
+| `pkg_fhs_verify_farm manifest_path` | Verify and repair symlink farm from manifest |
 
 ### 4.11 Uninstall
 
@@ -645,7 +647,7 @@ make -C tests test-all-parallel    # Full parallel matrix
 | `07-cron.bats` | 23 | Install, remove, legacy cleanup, schedule preserve/restore |
 | `08-docs.bats` | 19 | Man page gzip, bash completion, logrotate, doc dir |
 | `09-config.bats` | 30 | AWK merge, variable migration, clamp, set/get |
-| `10-fhs.bats` | 30 | Registry, symlink farm, RPM/DEB artifact generation |
+| `10-fhs.bats` | 73 | Registry, symlink farm, RPM/DEB artifact generation |
 | `11-uninstall.bats` | 17 | Confirm prompt, file removal, service cleanup |
 | `12-manifest.bats` | 12 | Load, validate, missing fields |
 | `13-generator.bats` | 26 | Output structure, substitution, conditionals, dry-run |

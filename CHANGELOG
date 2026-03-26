@@ -1,6 +1,13 @@
 pkg_lib CHANGELOG
 ==================
 
+- v1.0.6 | Mar 26 2026:
+  [New] pkg_fhs_gen_manifest: build-time function to generate tab-separated
+      symlink manifest from FHS registry for runtime verification
+  [New] pkg_fhs_verify_farm: runtime function to verify symlink farm integrity,
+      auto-repair broken/missing/wrong-target symlinks, report unrecoverable
+      errors when FHS targets are missing
+
 - v1.0.5 | Mar 23 2026:
   [Change] README: restructure for rfxn documentation convention floor compliance;
       centered flat-square badges, bold one-liner, copyright blockquote, numbered

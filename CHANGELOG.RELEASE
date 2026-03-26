@@ -1,23 +1,7 @@
-pkg_lib v1.0.5 | Mar 23 2026:
+pkg_lib v1.0.6 | Mar 26 2026:
 
-  [Change] README: restructure for rfxn documentation convention floor compliance;
-      centered flat-square badges, bold one-liner, copyright blockquote, numbered
-      sections (## 1-8), exit codes table, ## License, ## Support
-
-  [Fix] pkg_config_merge: use temp file for AWK output to prevent data loss
-      when output path equals new_conf path
-  [Fix] pkg_config_migrate_var: escape sed metacharacters in migrated values
-      to prevent output corruption with &, |, /, \ characters
-  [Fix] pkg_config_migrate_var: validate old_var and new_var as safe shell
-      identifiers before use in grep/sed patterns
-  [Fix] pkg_config_get: validate var name as safe shell identifier before
-      use in grep pattern
-  [Fix] pkg_backup, pkg_rclocal_remove: replace bare mv with command mv
-      for alias-bypass portability
-  [Change] pkg_config_get: remove dead AWK variable assignment
-  [Fix] README: update version badge from 1.0.2 to 1.0.5
-  [Fix] README: correct pkg_uninstall_man signature to section name
-  [Fix] README: correct pkg_service_uninstall_multi signature to name suffixes
-  [Change] README: annotate config merge examples as safe for in-place use
-  [Fix] Replace bare rm with command rm across all 33 call sites for
-      alias-bypass portability (class-wide fix per QA-002)
+  [New] pkg_fhs_gen_manifest: build-time function to generate tab-separated
+      symlink manifest from FHS registry for runtime verification
+  [New] pkg_fhs_verify_farm: runtime function to verify symlink farm integrity,
+      auto-repair broken/missing/wrong-target symlinks, report unrecoverable
+      errors when FHS targets are missing
