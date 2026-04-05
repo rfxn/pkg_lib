@@ -940,6 +940,20 @@ inject_init() {
 	[[ "$output" == *"required"* ]]
 }
 
+@test "pkg_rclocal_remove: preserves file permissions" {
+	echo "#!/bin/bash" > "${MOCK_RCLOCAL_DIR}/rc.local"
+	echo "/usr/local/sbin/myservice -s" >> "${MOCK_RCLOCAL_DIR}/rc.local"
+	chmod 755 "${MOCK_RCLOCAL_DIR}/rc.local"
+
+	run pkg_rclocal_remove "myservice"
+	[[ "$status" -eq 0 ]]
+
+	# Verify permissions preserved (not reset to 0600 by mktemp+mv)
+	local mode
+	mode=$(stat -c '%a' "${MOCK_RCLOCAL_DIR}/rc.local")
+	[[ "$mode" = "755" ]]
+}
+
 # ── FreeBSD guards (comprehensive) ──────────────────────────────
 
 @test "pkg_service_stop: FreeBSD returns 1" {

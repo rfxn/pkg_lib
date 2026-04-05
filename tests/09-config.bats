@@ -200,6 +200,58 @@ EOF
 	[[ "$output" = "foo|bar|baz" ]]
 }
 
+@test "pkg_config_set: escapes shell metacharacters in value (injection test)" {
+	local conf="${TEST_TMPDIR}/inject.conf"
+	echo 'SAFE_VAR="original"' > "$conf"
+
+	# Value containing shell injection payload
+	pkg_config_set "$conf" "SAFE_VAR" '"; echo INJECTED #'
+
+	# Source the file — injection must NOT execute
+	local result
+	result=$(bash -c "source \"$conf\" 2>/dev/null; echo \"\$SAFE_VAR\"")
+	[[ "$result" = '"; echo INJECTED #' ]]
+
+	# Verify INJECTED does not appear in output from sourcing
+	run bash -c "source \"$conf\" 2>&1"
+	[[ "$output" != *"INJECTED"* ]]
+}
+
+@test "pkg_config_set: round-trips backslash in value" {
+	local conf="${TEST_TMPDIR}/backslash.conf"
+	echo 'MY_VAR="old"' > "$conf"
+
+	# Single backslash in value — must survive set → source round-trip
+	pkg_config_set "$conf" "MY_VAR" 'path\to\file'
+
+	local result
+	result=$(bash -c "source \"$conf\"; echo \"\$MY_VAR\"")
+	[[ "$result" = 'path\to\file' ]]
+}
+
+@test "pkg_config_set: round-trips dollar sign in value" {
+	local conf="${TEST_TMPDIR}/dollar.conf"
+	echo 'MY_VAR="old"' > "$conf"
+
+	pkg_config_set "$conf" "MY_VAR" 'price is $5.00'
+
+	local result
+	result=$(bash -c "source \"$conf\"; echo \"\$MY_VAR\"")
+	[[ "$result" = 'price is $5.00' ]]
+}
+
+@test "pkg_config_set: append path escapes shell metacharacters" {
+	local conf="${TEST_TMPDIR}/append.conf"
+	echo '# empty config' > "$conf"
+
+	# Append a new variable with injection payload
+	pkg_config_set "$conf" "NEW_VAR" '$(echo PWNED)'
+
+	local result
+	result=$(bash -c "source \"$conf\" 2>/dev/null; echo \"\$NEW_VAR\"")
+	[[ "$result" = '$(echo PWNED)' ]]
+}
+
 # ── pkg_config_merge ──────────────────────────────────────────────
 
 @test "pkg_config_merge: preserves old values for matching variables" {
@@ -566,9 +618,41 @@ EOF
 	run pkg_config_migrate_var "$conf" "OLD_VAR" "NEW_VAR"
 	[[ "$status" -eq 0 ]]
 
-	run pkg_config_get "$conf" "NEW_VAR"
+	# Verify sourced value matches original semantics (path\here)
+	local result
+	result=$(bash -c "source \"$conf\"; echo \"\$NEW_VAR\"")
+	[[ "$result" = 'path\here' ]]
+}
+
+@test "pkg_config_migrate_var: escapes shell metacharacters (injection test)" {
+	local conf="${TEST_TMPDIR}/inject_migrate.conf"
+	# Single-quoted original: " is literal, safe inside single quotes
+	printf "OLD_VAR='val\"; echo INJECTED'\n" > "$conf"
+
+	run pkg_config_migrate_var "$conf" "OLD_VAR" "NEW_VAR"
 	[[ "$status" -eq 0 ]]
-	[[ "$output" = 'path\here' ]]
+
+	# Source the file — injection must NOT execute
+	local result
+	result=$(bash -c "source \"$conf\" 2>/dev/null; echo \"\$NEW_VAR\"")
+	[[ "$result" = 'val"; echo INJECTED' ]]
+
+	# Verify INJECTED does not appear in output from sourcing
+	run bash -c "source \"$conf\" 2>&1"
+	[[ "$output" != *"INJECTED"* ]]
+}
+
+@test "pkg_config_migrate_var: escapes dollar sign in value" {
+	local conf="${TEST_TMPDIR}/dollar_migrate.conf"
+	printf "OLD_VAR='\$(echo PWNED)'\n" > "$conf"
+
+	run pkg_config_migrate_var "$conf" "OLD_VAR" "NEW_VAR"
+	[[ "$status" -eq 0 ]]
+
+	# Source the file — command substitution must NOT execute
+	local result
+	result=$(bash -c "source \"$conf\" 2>/dev/null; echo \"\$NEW_VAR\"")
+	[[ "$result" = '$(echo PWNED)' ]]
 }
 
 # ── pkg_config_clamp ─────────────────────────────────────────────

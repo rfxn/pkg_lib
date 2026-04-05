@@ -1,6 +1,28 @@
 pkg_lib CHANGELOG
 ==================
 
+- v1.0.7 | Apr 05 2026:
+  [Fix] pkg_rclocal_remove: preserve file permissions (stat/chmod) after
+      mktemp+mv atomic replace — prevents rc.local losing 755 executable bit
+      on CentOS 6 and Slackware (P1-1)
+  [Fix] pkg_config_set: escape shell metacharacters (\, ", $, `) in values
+      to prevent code execution when config files are sourced as root (P2-1)
+  [Fix] pkg_config_migrate_var: escape shell metacharacters in migrated values
+      to prevent injection when single-quoted originals are written into
+      double-quoted context (P2-1 extension)
+  [Fix] pkg_cron_restore_schedule: extend BRE search escaping to include
+      [, ], ^, $ metacharacters for correctness (P2-2)
+  [Fix] pkg_sed_replace, pkg_man_install: split search/replacement escaping —
+      BRE search now escapes .*[\^$, replacement escaping unchanged (P3-3)
+  [Change] pkg_manifest_load: add ownership check (-O) before sourcing
+      manifest file — defense-in-depth for untrusted file contexts (P3-1)
+  [Change] pkg_rclocal_remove: use grep -F for fixed-string matching
+      instead of regex — strictly more correct for service name patterns (P3-2)
+  [Change] pkg_symlink: replace rm+ln with command ln -sf to reduce TOCTOU
+      window and fix pre-existing bare ln coreutils violation (P3-4)
+  [Change] pkg_config_get: document raw-reader semantics — AWK-based extractor
+      returns literal file bytes, not shell-interpreted values
+
 - v1.0.6 | Mar 26 2026:
   [New] pkg_fhs_gen_manifest: build-time function to generate tab-separated
       symlink manifest from FHS registry for runtime verification

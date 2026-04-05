@@ -342,6 +342,17 @@ teardown() {
 	[[ "$output" == *"required"* ]]
 }
 
+@test "pkg_sed_replace: handles dots in paths (literal match)" {
+	local file="${TEST_TMPDIR}/dotpath.conf"
+	printf '%s\n' "path=/usr/local/maldetect" "other=/usr/local/maldetecX" > "$file"
+
+	pkg_sed_replace "/usr/local/maldetect" "/opt/maldetect" "$file"
+
+	# The dot in "maldetect" must be literal — "maldetecX" must NOT match
+	grep -q "/opt/maldetect" "$file"
+	grep -q "/usr/local/maldetecX" "$file"
+}
+
 # ── pkg_tmpfile ──────────────────────────────────────────────────
 
 @test "pkg_tmpfile: creates temp file in PKG_TMPDIR" {

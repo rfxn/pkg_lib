@@ -61,6 +61,25 @@ MANIFEST
 	[[ "$output" == *"not found"* ]]
 }
 
+@test "pkg_manifest_load: rejects file not owned by current user" {
+	# coverage: manual-only — Docker CI runs as root, so -O always passes
+	[[ $(id -u) -eq 0 ]] && skip "cannot test ownership rejection as root"
+
+	local manifest="${TEST_TMPDIR}/pkg.manifest"
+	cat > "$manifest" <<'MANIFEST'
+PKG_NAME="testapp"
+PKG_VERSION="1.0.0"
+PKG_SUMMARY="Test"
+PKG_INSTALL_PATH="/opt/testapp"
+MANIFEST
+	# Change ownership to nobody (uid 65534)
+	chown 65534 "$manifest"
+
+	run pkg_manifest_load "$manifest"
+	[[ "$status" -eq 1 ]]
+	[[ "$output" == *"not owned by current user"* ]]
+}
+
 @test "pkg_manifest_load: handles manifest with comments" {
 	local manifest="${TEST_TMPDIR}/pkg.manifest"
 	cat > "$manifest" <<'MANIFEST'
