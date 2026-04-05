@@ -20,4 +20,4 @@ pkg_lib v1.0.7 | Apr 05 2026:
       window and fix pre-existing bare ln coreutils violation (P3-4)
   [Change] pkg_config_get: document raw-reader semantics — AWK-based extractor
       returns literal file bytes, not shell-interpreted values
-  [Change] CI: batsman workflow pin v1.0.3 → v1.4.0
+  [Change] CI: batsman 1.4.0 → 1.4.1; CI workflow pin v1.0.3 → v1.4.1
