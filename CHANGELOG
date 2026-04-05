@@ -1,6 +1,16 @@
 pkg_lib CHANGELOG
 ==================
 
+- v1.0.8 | Apr 05 2026:
+  [Fix] pkg_prune_backups, pkg_restore_files: replace process substitution
+      (< <(find ...)) with here-string (<<< "$(find ...)") — bash 4.2 in
+      POSIX mode (sh invocation) rejects process substitution at parse time,
+      breaking `sh install.sh` on CentOS 7 and CentOS 6
+  [Fix] pkg_symlink: use ln -sfn instead of ln -sf to prevent following
+      existing symlink-to-directory targets — classic ln gotcha where
+      ln -sf creates the new link inside the directory rather than
+      replacing the symlink itself
+
 - v1.0.7 | Apr 05 2026:
   [Fix] pkg_rclocal_remove: preserve file permissions (stat/chmod) after
       mktemp+mv atomic replace — prevents rc.local losing 755 executable bit
