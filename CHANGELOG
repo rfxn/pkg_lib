@@ -1,6 +1,20 @@
 pkg_lib CHANGELOG
 ==================
 
+- v1.0.9 | Apr 07 2026:
+  [Fix] pkg_config_merge: anchor variable detection to a real shell
+      assignment regex (^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=). Pre-1.0.9
+      treated any line containing `=` as VAR=value, corrupting
+      conditional expressions like `[ "$X" = "1" ]` and
+      `[[ "$Y" == "auto" ]]` into `[ "$X"= "1" ]` / `[[ "$Y"== "auto" ]]`
+      by stripping the space before the operator. The merge function
+      remains semantically unsafe for files with conditional assignments
+      (branches collapse) — documented in the function header. Regression
+      test added in tests/09-config.bats covering bash conditional
+      passthrough plus a `bash -n` parse check on the merged output.
+      Surfaced as a class of CI failures in APF where importconf merged
+      internals.conf on every reinstall
+
 - v1.0.8 | Apr 05 2026:
   [Fix] pkg_prune_backups, pkg_restore_files: replace process substitution
       (< <(find ...)) with here-string (<<< "$(find ...)") — bash 4.2 in

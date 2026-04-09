@@ -458,6 +458,51 @@ EOF
 	[[ "$empty_count" -ge 1 ]]
 }
 
+@test "pkg_config_merge: passes through bash conditional lines containing =" {
+	# Regression: pre-1.0.9 the merge treated any line containing `=` as a
+	# VAR=value assignment, corrupting `[ "$X" = "1" ]` and
+	# `[[ "$Y" == "auto" ]]` by stripping the space before the operator.
+	# This broke files like APF's internals.conf at install-upgrade time.
+	local old="${TEST_TMPDIR}/old.conf"
+	local new="${TEST_TMPDIR}/new.conf"
+	local out="${TEST_TMPDIR}/merged.conf"
+
+	cat > "$old" <<'EOF'
+SET_MONOKERN="1"
+IPT_LOCK_SUPPORT="auto"
+if [ "$SET_MONOKERN" = "1" ]; then
+	STATE_MATCH="-m conntrack --ctstate"
+fi
+if [[ "$IPT_LOCK_SUPPORT" == "auto" ]]; then
+	IPT_FLAGS="-w 30"
+fi
+EOF
+
+	cat > "$new" <<'EOF'
+SET_MONOKERN="0"
+IPT_LOCK_SUPPORT="auto"
+if [ "$SET_MONOKERN" = "1" ]; then
+	STATE_MATCH="-m conntrack --ctstate"
+fi
+if [[ "$IPT_LOCK_SUPPORT" == "auto" ]]; then
+	IPT_FLAGS="-w 30"
+fi
+EOF
+
+	run pkg_config_merge "$old" "$new" "$out"
+	[[ "$status" -eq 0 ]]
+
+	# Conditional lines must round-trip verbatim — no space loss before = / ==
+	grep -qF 'if [ "$SET_MONOKERN" = "1" ]; then' "$out"
+	grep -qF 'if [[ "$IPT_LOCK_SUPPORT" == "auto" ]]; then' "$out"
+
+	# The merged file must parse cleanly under bash
+	bash -n "$out"
+
+	# Old VAR=value still wins for real assignments
+	grep -q '^SET_MONOKERN="1"' "$out"
+}
+
 @test "pkg_config_merge: output==new_conf produces correct merge" {
 	local old="${TEST_TMPDIR}/old.conf"
 	local new="${TEST_TMPDIR}/inplace.conf"
