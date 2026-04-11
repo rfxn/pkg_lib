@@ -1,6 +1,22 @@
 pkg_lib CHANGELOG
 ==================
 
+- v1.0.10 | Apr 10 2026:
+  [Change] files/pkg_lib.sh: removed 206 signature-restatement lines from
+      42 multi-line function-header blocks — deleted `# Arguments:` /
+      `#   $N — name` / default `# Returns 0/1` lines that restated what
+      the code declared on the next line. Load-bearing prose preserved
+      intact: non-obvious return semantics, side-effect documentation,
+      security rationale (AWK/shell injection vectors, symlink-directory
+      gotchas, eval-guard validation), platform quirks (GNU vs BSD stat,
+      FreeBSD guards, CentOS 6 usr-merge), bash 4.1 compat notes
+      (indirect expansion, no declare -n), detection-chain documentation,
+      and the full pkg_config_merge conditional-expression safety header.
+      One-line-header style per rdf core profile comment-discipline rule.
+      Zero functional change; shellcheck count unchanged (0); load-bearing
+      whitelist diff content-identical.
+  [Change] PKG_LIB_VERSION: 1.0.9 → 1.0.10
+
 - v1.0.9 | Apr 07 2026:
   [Fix] pkg_config_merge: anchor variable detection to a real shell
       assignment regex (^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=). Pre-1.0.9
