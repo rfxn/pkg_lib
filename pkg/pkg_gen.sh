@@ -41,10 +41,6 @@ set -euo pipefail
 
 PKG_GEN_VERSION="1.0.0"
 
-# ══════════════════════════════════════════════════════════════════
-# Section: Output helpers
-# ══════════════════════════════════════════════════════════════════
-
 _gen_info() {
 	echo "  [info] $1"
 }
@@ -52,10 +48,6 @@ _gen_info() {
 _gen_error() {
 	echo "  [error] $1" >&2
 }
-
-# ══════════════════════════════════════════════════════════════════
-# Section: Argument parsing
-# ══════════════════════════════════════════════════════════════════
 
 _gen_usage() {
 	cat <<'USAGE'
@@ -150,10 +142,6 @@ _gen_parse_args() {
 	_GEN_OUTPUT="$opt_output"
 }
 
-# ══════════════════════════════════════════════════════════════════
-# Section: Manifest loading
-# ══════════════════════════════════════════════════════════════════
-
 _gen_load_manifest() {
 	# Source the manifest to get all PKG_* variables
 	# shellcheck disable=SC1090
@@ -176,10 +164,6 @@ _gen_load_manifest() {
 
 	return "$rc"
 }
-
-# ══════════════════════════════════════════════════════════════════
-# Section: Placeholder substitution
-# ══════════════════════════════════════════════════════════════════
 
 # _gen_build_sed_script — build a sed script from manifest PKG_* variables
 # Collects all PKG_* scalar variables from the manifest and builds sed
@@ -301,10 +285,6 @@ _gen_substitute_file() {
 	return 0
 }
 
-# ══════════════════════════════════════════════════════════════════
-# Section: Output structure generation
-# ══════════════════════════════════════════════════════════════════
-
 # _gen_output_path — compute output path from template path
 # Transforms template-relative path to output path:
 #   - Strips .in suffix
@@ -388,10 +368,6 @@ _gen_process_templates() {
 	return 0
 }
 
-# ══════════════════════════════════════════════════════════════════
-# Section: Summary report
-# ══════════════════════════════════════════════════════════════════
-
 _gen_report() {
 	echo ""
 	echo "=== pkg_gen.sh complete ==="
@@ -416,10 +392,6 @@ _gen_report() {
 		_gen_info "These are two-level tokens for project-specific post-processing"
 	fi
 }
-
-# ══════════════════════════════════════════════════════════════════
-# Section: Main
-# ══════════════════════════════════════════════════════════════════
 
 main() {
 	echo "=== pkg_gen.sh ${PKG_GEN_VERSION} — manifest-driven packaging generator ==="

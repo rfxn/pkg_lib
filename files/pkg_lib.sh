@@ -2604,6 +2604,8 @@ pkg_fhs_gen_manifest() {
 # Repairs broken, wrong-target, and regular-file-blocked links when the target exists.
 # Returns 1 if any target is missing or a directory blocks a symlink path. No manifest = 0
 # silently (install.sh layout has no symlink farm).
+# Defense-in-depth: refuses manifests not owned by the current user — an attacker-writable
+# manifest could otherwise repoint symlinks or replace regular files with arbitrary targets.
 pkg_fhs_verify_farm() {
 	local manifest_path="$1"
 
@@ -2614,6 +2616,11 @@ pkg_fhs_verify_farm() {
 
 	if [[ ! -f "$manifest_path" ]]; then
 		return 0
+	fi
+
+	if [[ ! -O "$manifest_path" ]]; then
+		pkg_error "pkg_fhs_verify_farm: ${manifest_path} not owned by current user"
+		return 1
 	fi
 
 	local rc=0

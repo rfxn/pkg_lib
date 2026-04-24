@@ -1,7 +1,20 @@
 pkg_lib CHANGELOG
 ==================
 
-- v1.0.10 | Apr 10 2026:
+- v1.0.10 | Apr 24 2026:
+  [Fix] pkg_fhs_verify_farm: add `[[ -O "$manifest_path" ]]` ownership
+      check mirroring pkg_manifest_load. An attacker-writable manifest
+      could otherwise cause pkg_fhs_verify_farm (run as root) to destroy
+      a legitimate regular file and replace it with a symlink to an
+      arbitrary target. Manifest absence still returns 0 silently; a
+      present-but-foreign-owned manifest now errors and returns 1.
+      Surfaced by /r-audit security pass (post-v1.0.7 remediation
+      audit).
+  [Change] pkg/pkg_gen.sh: removed 14 unicode banner separators across
+      7 section blocks — extends v1.0.10's comment-discipline cleanup to
+      the build-time generator that was missed by the first pass. Section
+      boundaries now use blank lines per Code Comments rule. Zero
+      functional change; shellcheck count unchanged (0).
   [Change] files/pkg_lib.sh: removed 206 signature-restatement lines from
       42 multi-line function-header blocks — deleted `# Arguments:` /
       `#   $N — name` / default `# Returns 0/1` lines that restated what
